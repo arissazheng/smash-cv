@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.DS_Store
+
+# Downloaded by tools/download_models.py
+models/*.task
+
+# Per-person, per-laptop
+calibration/*.json
+
+# Raw video is big; landmark recordings (.jsonl) are committed as test data
+recordings/**/*.mp4
+recordings/**/*.avi
