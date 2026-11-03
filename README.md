@@ -30,12 +30,62 @@ pytest                                     # tests, no camera needed
 
 Close the game window to quit. In the overlay and recorder windows, press `q`.
 
-## How it fits together
+## Architecture
 
+```mermaid
+flowchart LR
+    subgraph P1["Person 1 · vision/"]
+        CAM["Webcam thread<br/>camera.py"] --> MP["MediaPipe Pose + Gesture Recognizer<br/>pose.py"]
+        MP --> SM["Smoothing + calibration<br/>smoothing.py · calibration.py"]
+    end
+
+    subgraph P2["Person 2 · gestures/"]
+        REC["Gesture recognizer<br/>detectors.py · recognizer.py"]
+        CLIPS[("Recorded clips<br/>recordings/*.jsonl")]
+    end
+
+    subgraph CTRL["controllers/"]
+        CC["CameraController"]
+        RC["ReplayController"]
+    end
+
+    CS{{"ControllerState<br/>shared/controller_state.py"}}
+
+    subgraph P3["Person 3 · game/"]
+        ENG["Game loop<br/>engine.py"] --> FIG["Fighters + physics<br/>fighter.py"]
+        FIG --> COM["Hitboxes + knockback<br/>combat.py"]
+        STG["Stage layout<br/>stage.py"] --> FIG
+        CPU["CPU opponent<br/>cpu.py"]
+    end
+
+    subgraph P4["Person 4 · ui/"]
+        RND["Renderer + HUD + menus<br/>render.py · hud.py · menus.py"]
+        SP["Sprite pipeline (OpenCV)<br/>sprite_pipeline.py"]
+        ART[("assets/<br/>characters · stages")]
+    end
+
+    SM -- LandmarkFrame --> CC
+    CLIPS -- LandmarkFrame --> RC
+    CC --> REC
+    RC --> REC
+    REC --> CS
+    CS -- "poll() each tick" --> ENG
+    CPU -- player 2 --> ENG
+    ENG --> RND
+    SP --> ART --> RND
+    RND --> SCREEN["pygame window"]
 ```
-webcam (OpenCV) -> MediaPipe Pose + Gesture Recognizer -> smoothing -> gesture recognizer
-    -> ControllerState -> game engine -> renderer
-```
+
+Data moves left to right. The camera thread runs at camera speed (about 30
+fps) and the game loop at 60 fps. Each tick, the game asks every controller
+for its latest `ControllerState`.
+
+| Type | Defined in | Produced by | Consumed by |
+| --- | --- | --- | --- |
+| `LandmarkFrame` | `shared/landmarks.py` | `vision/pose.py`, recordings | `gestures/` |
+| `Calibration` | `vision/calibration.py` | `main.py calibrate` | `gestures/detectors.py` |
+| `ControllerState` | `shared/controller_state.py` | `gestures/recognizer.py`, `game/cpu.py` | `game/` |
+| `Fighter.state` (animation name) | `game/fighter.py` | `game/` | `ui/render.py` |
 
 The game only ever calls `controller.poll()` and gets a `ControllerState`
 (`shared/controller_state.py`). That file is the contract between the vision
