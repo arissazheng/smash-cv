@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pixel_sprite import Canvas, save  # noqa: E402
 
+NAME = "Oski the Bear"
+
 PALETTE = {
     "fur": "#d9b27c", "fur_light": "#efcd9a", "fur_shade": "#b98e57",
     "mane": "#4b301f", "mane_light": "#72503a", "mane_dark": "#2c1c12",
@@ -161,4 +163,4 @@ def side() -> Canvas:
 
 
 if __name__ == "__main__":
-    save(Path(__file__).resolve().parent, front(), side())
+    save(Path(__file__).resolve().parent, front(), side(), NAME)

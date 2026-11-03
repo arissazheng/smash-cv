@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pixel_sprite import Canvas, save  # noqa: E402
 
+NAME = "Prof. Ren Ng"
+
 PALETTE = {
     "hair": "#24242c", "hair_light": "#454a5c", "hair_dark": "#121218",
     "skin": "#f0c39a", "skin_shade": "#d8a179", "cheek": "#e6a08a",
@@ -160,4 +162,4 @@ def side() -> Canvas:
 
 
 if __name__ == "__main__":
-    save(Path(__file__).resolve().parent, front(), side())
+    save(Path(__file__).resolve().parent, front(), side(), NAME)

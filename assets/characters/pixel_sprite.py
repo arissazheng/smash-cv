@@ -79,32 +79,58 @@ class Canvas:
         return img
 
 
-def preview(views: dict[str, np.ndarray], scale: int = 8) -> np.ndarray:
-    """Views side by side on a dark shelf, like a roster sheet."""
-    pad, gap, shelf_h = 24, 40, 10
+FONT = cv2.FONT_HERSHEY_DUPLEX
+TEXT = (0xd8, 0xcf, 0xe0, 255)    # BGRA
+TITLE = (0x7c, 0xc4, 0xf5, 255)   # gold
+
+
+def _text_width(text: str, size: float) -> int:
+    return cv2.getTextSize(text, FONT, size, 1)[0][0]
+
+
+def preview(views: dict[str, np.ndarray], scale: int = 8, title: str | None = None) -> np.ndarray:
+    """Views side by side on a dark shelf, like a roster sheet.
+
+    Keys are the labels under each view; a "\n" splits a label onto two lines.
+    `title` is drawn across the top.
+    """
+    label_size, line_h = 0.7, 26
+    labels = {name: name.upper().split("\n") for name in views}
+    widest = max(_text_width(line, label_size) for lines in labels.values() for line in lines)
+    pad, shelf_h = 24, 10
+    gap = max(40, widest - W * scale + 24)  # room for long names
+    title_h = 50 if title else 0
+    label_h = max(len(lines) for lines in labels.values()) * line_h + 12
     width = pad * 2 + len(views) * W * scale + (len(views) - 1) * gap
-    height = pad * 2 + H * scale + shelf_h + 30
+    height = title_h + pad * 2 + H * scale + shelf_h + label_h
     sheet = np.zeros((height, width, 4), np.uint8)
     sheet[:] = (0x2e, 0x1f, 0x2b, 255)  # BGRA dark plum
-    floor_y = pad + H * scale
+    top = title_h + pad
+    floor_y = top + H * scale
     sheet[floor_y:floor_y + shelf_h] = (0x55, 0x3d, 0x52, 255)
     sheet[floor_y + shelf_h:floor_y + shelf_h + 6] = (0x24, 0x18, 0x22, 255)
+
+    if title:
+        size = 1.0
+        cv2.putText(sheet, title.upper(), ((width - _text_width(title.upper(), size)) // 2, 42),
+                    FONT, size, TITLE, 2, cv2.LINE_AA)
 
     for i, (name, img) in enumerate(views.items()):
         big = cv2.resize(img, (W * scale, H * scale), interpolation=cv2.INTER_NEAREST)
         x0 = pad + i * (W * scale + gap)
-        region = sheet[pad:pad + H * scale, x0:x0 + W * scale]
+        region = sheet[top:top + H * scale, x0:x0 + W * scale]
         alpha = big[:, :, 3:4] / 255.0
         region[:] = (big * alpha + region * (1 - alpha)).astype(np.uint8)
-        label = name.upper()
-        (tw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_DUPLEX, 0.7, 1)
-        cv2.putText(sheet, label, (x0 + (W * scale - tw) // 2, height - 12),
-                    cv2.FONT_HERSHEY_DUPLEX, 0.7, (0xd8, 0xcf, 0xe0, 255), 1, cv2.LINE_AA)
+        center = x0 + W * scale // 2
+        for j, line in enumerate(labels[name]):
+            y = floor_y + shelf_h + 30 + j * line_h
+            cv2.putText(sheet, line, (center - _text_width(line, label_size) // 2, y),
+                        FONT, label_size, TEXT, 1, cv2.LINE_AA)
     return sheet
 
 
-def save(folder: Path, front: Canvas, left: Canvas) -> None:
-    """Mirror left into right and write every output file.
+def save(folder: Path, front: Canvas, left: Canvas, name: str) -> None:
+    """Mirror left into right and write every output file. `name` titles the preview.
 
     Call outline() on each canvas first, then add any inner lines.
     """
@@ -112,9 +138,9 @@ def save(folder: Path, front: Canvas, left: Canvas) -> None:
     views = {"left": left_img, "front": front.to_bgra(), "right": cv2.flip(left_img, 1)}
 
     (folder / "views").mkdir(exist_ok=True)
-    for name, img in views.items():
-        cv2.imwrite(str(folder / "views" / f"{name}.png"), img)
+    for view, img in views.items():
+        cv2.imwrite(str(folder / "views" / f"{view}.png"), img)
     (folder / "idle").mkdir(exist_ok=True)
     cv2.imwrite(str(folder / "idle" / "frame_00.png"), views["right"])  # game sprites face right
-    cv2.imwrite(str(folder / "preview.png"), preview(views))
+    cv2.imwrite(str(folder / "preview.png"), preview(views, title=name))
     print(f"wrote views/, idle/frame_00.png and preview.png in {folder}")
