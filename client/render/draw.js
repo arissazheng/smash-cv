@@ -2,15 +2,17 @@
 //
 // Owner: Person 4.
 //
-// Fighters are colored boxes until sprites exist.
-// TODO(Person 4): load sprite atlases and draw the frame for each fighter's
-// state and stateTime, falling back to the box when a character has no art.
+// Fighters are drawn with their character's sprite (see sprites.js), or as
+// colored boxes until it loads.
+
+import { SPRITE_SCALE } from "./sprites.js";
 
 export const PLAYER_COLORS = ["#e64646", "#4682e6", "#f0c83c", "#50c86e"]; // P1-P4, same as the Python renderer
 const SKY = "#181a30";
 const GROUND = "#5a5a6e";
 const PLATFORM = "#9696af";
 const HITBOX = "#fff078";
+const BODY_HEIGHT = 90; // standing body height in game/fighter.py
 
 export function playerColor(id) {
   return PLAYER_COLORS[id % PLAYER_COLORS.length];
@@ -30,34 +32,23 @@ export function drawStage(ctx, stage, background = null) {
   for (const platform of stage.platforms) ctx.fillRect(...platform);
 }
 
+const ATTACKS = ["jab", "smash", "special", "up_special", "grab"];
+
 /**
  * @param {CanvasRenderingContext2D} ctx
  * @param {import("./protocol.js").FighterSnapshot} f
- * @param {{stateTime: number, time?: number, showHitboxes: boolean}} look
+ * @param {{stateTime: number, time?: number, showHitboxes: boolean, sprite?: CanvasImageSource | null}} look
  */
-export function drawFighter(ctx, f, { stateTime, time = 0, showHitboxes }) {
+export function drawFighter(ctx, f, { stateTime, time = 0, showHitboxes, sprite = null }) {
   // Blink while invulnerable after respawning.
   ctx.globalAlpha = f.invulnerable && Math.floor(time * 10) % 2 === 0 ? 0.35 : 1;
-  const left = Math.round(f.x - f.w / 2);
-  const top = Math.round(f.y - f.h);
+  const hurtFlash = f.state === "hurt" && Math.floor(stateTime * 20) % 2 === 0;
+  const attacking = ATTACKS.includes(f.state);
 
-  // Flash white while hurt so hits read clearly.
-  const flashing = f.state === "hurt" && Math.floor(stateTime * 20) % 2 === 0;
-  ctx.fillStyle = flashing ? "#ffffff" : playerColor(f.id);
-  roundRect(ctx, left, top, f.w, f.h, 8);
-  ctx.fill();
-
-  // Eye shows which way the fighter faces.
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.arc(f.x + f.facing * 14, top + 20, 6, 0, Math.PI * 2);
-  ctx.fill();
-
-  // A short arm sticks out during attacks, so attacks are visible before sprites exist.
-  if (["jab", "smash", "special", "up_special", "grab"].includes(f.state)) {
-    ctx.fillStyle = playerColor(f.id);
-    const armX = f.facing > 0 ? left + f.w : left - 24;
-    ctx.fillRect(armX, top + 30, 24, 12);
+  if (sprite) {
+    drawSprite(ctx, f, sprite, { hurtFlash, attacking });
+  } else {
+    drawBox(ctx, f, { hurtFlash, attacking });
   }
 
   if (f.shield) {
@@ -74,6 +65,49 @@ export function drawFighter(ctx, f, { stateTime, time = 0, showHitboxes }) {
     ctx.strokeStyle = HITBOX;
     ctx.lineWidth = 2;
     ctx.strokeRect(...f.hitbox);
+  }
+}
+
+/** The character's frame for this state, feet on (x, y), mirrored when facing left. */
+function drawSprite(ctx, f, sprite, { hurtFlash }) {
+  const w = sprite.width * SPRITE_SCALE;
+  const fullHeight = sprite.height * SPRITE_SCALE;
+  const h = Math.round(fullHeight * Math.min(1, f.h / BODY_HEIGHT)); // shorter while crouching
+  const x = Math.round(f.x - w / 2);
+  const y = Math.round(f.y - h);
+  const alpha = ctx.globalAlpha;
+  if (hurtFlash) ctx.globalAlpha = alpha * 0.45; // flicker when hit
+  if (f.facing < 0) {
+    ctx.save();
+    ctx.translate(x + w, y);
+    ctx.scale(-1, 1);
+    ctx.drawImage(sprite, 0, 0, w, h);
+    ctx.restore();
+  } else {
+    ctx.drawImage(sprite, x, y, w, h);
+  }
+  ctx.globalAlpha = alpha;
+}
+
+/** Placeholder while a character has no art (or it hasn't loaded yet). */
+function drawBox(ctx, f, { hurtFlash, attacking }) {
+  const left = Math.round(f.x - f.w / 2);
+  const top = Math.round(f.y - f.h);
+  ctx.fillStyle = hurtFlash ? "#ffffff" : playerColor(f.id);
+  roundRect(ctx, left, top, f.w, f.h, 8);
+  ctx.fill();
+
+  // Eye shows which way the fighter faces.
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(f.x + f.facing * 14, top + 20, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // A short arm sticks out during attacks.
+  if (attacking) {
+    ctx.fillStyle = playerColor(f.id);
+    const armX = f.facing > 0 ? left + f.w : left - 24;
+    ctx.fillRect(armX, top + 30, 24, 12);
   }
 }
 

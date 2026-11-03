@@ -255,3 +255,36 @@ def test_slow_link_gets_only_the_newest_snapshot():
 
 def test_neutral_state_has_no_pause():
     assert ControllerState().pause is False  # pause is ignored online (see Session.consume)
+
+
+def test_host_picks_the_stage_and_players_can_change_fighter():
+    async def scenario():
+        server, link = await started_server()
+        a, b = await joined(link)                                  # a joined first: a is the host
+        await b.send({"type": "stage", "stage": "soda_hall"})      # not the host: ignored
+        await a.send({"type": "stage", "stage": "sather_gate"})
+        await b.wait_for("lobby", stage="sather_gate")
+        assert not b.of_type("lobby", stage="soda_hall")
+        await b.send({"type": "character", "character": "liu"})
+        await a.wait_for("lobby", where=lambda m: any(p["id"] == 1 and p["character"] == "liu" for p in m["players"]))
+        await a.ready()
+        await b.ready()
+        start = await a.wait_for("match_start")
+        assert start["stage"]["name"] == "Sather Gate"
+        assert start["stage"]["background"] == "sather_gate.png"
+        assert [p["character"] for p in start["players"]] == ["efros", "liu"]
+        snap = await a.wait_for("snapshot")
+        assert fighter(snap, 1)["character"] == "liu"
+        await b.send({"type": "stage", "stage": "gateway"})        # can't change mid-match
+        await asyncio.sleep(0.1)
+        assert server.stage_id == "sather_gate"
+        for bot in (a, b):
+            await bot.close()
+        await server.close()
+    run(scenario)
+
+
+def test_stage_lists_agree():
+    from game.stage import STAGES
+    from network.protocol import STAGES as WIRE_STAGES
+    assert tuple(STAGES) == WIRE_STAGES

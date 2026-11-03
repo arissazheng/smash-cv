@@ -18,6 +18,7 @@ import { Renderer } from "../renderer.js";
 import { interpolate } from "../interpolation.js";
 import { PROTOCOL_VERSION } from "../../net.js";
 import { CHARACTERS } from "../../characters.js";
+import { STAGES } from "../../stages.js";
 
 const EXAMPLES_DIR = new URL("../../../shared/protocol_examples/", import.meta.url);
 const example = (name) => JSON.parse(readFileSync(new URL(`${name}.json`, EXAMPLES_DIR), "utf8"));
@@ -159,4 +160,17 @@ test("a respawn snaps instead of sliding", () => {
   const a = { type: "snapshot", tick: 1, t: 0, fighters: [{ ...example("snapshot").fighters[0], x: 100, life_id: 0 }] };
   const b = { type: "snapshot", tick: 2, t: 0.1, fighters: [{ ...a.fighters[0], x: 150, life_id: 1 }] };
   assert.equal(interpolate(a, b, 0.5).fighters[0].x, 150);
+});
+
+test("browser and server agree on the stage list, and every stage has art", () => {
+  const python = readFileSync(new URL("../../../network/protocol.py", import.meta.url), "utf8");
+  const ids = [...python.match(/^STAGES = \(([^)]*)\)/m)[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(STAGES.map((s) => s.id), ids, "client/stages.js and network/protocol.py differ");
+  for (const s of STAGES) {
+    assert.ok(readFileSync(new URL(`../../../assets/stages/${s.id}.png`, import.meta.url)).length > 0, s.id);
+  }
+});
+
+test("lobby example names a known stage", () => {
+  assert.ok(STAGES.some((s) => s.id === example("lobby").stage));
 });

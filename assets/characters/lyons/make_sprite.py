@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from poses import Limbs  # noqa: E402
 from pixel_sprite import Canvas, save  # noqa: E402
 
 NAME = "Chancellor Rich Lyons"
@@ -48,6 +49,9 @@ def guitar_front(c: Canvas):
             c.put(17 + i, 24 - i, "neck_light")
     c.pixels("headstock", (26, 15), (27, 15), (26, 14), (27, 14), (27, 13))
     c.pixels("peg", (25, 13), (28, 14), (26, 12))
+
+# Sleeve and hand colors for the generated action poses (see ../poses.py)
+LIMBS = Limbs("suit", "suit_light", "skin", "skin_shade", keep_front=True)  # keeps the guitar
 
 
 def front() -> Canvas:
@@ -204,4 +208,4 @@ def side() -> Canvas:
 
 
 if __name__ == "__main__":
-    save(Path(__file__).resolve().parent, front(), side(), NAME)
+    save(Path(__file__).resolve().parent, front(), side(), NAME, LIMBS)

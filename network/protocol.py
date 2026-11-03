@@ -8,6 +8,8 @@ and decides every input by running the gesture recognizer on the landmarks
 the browser sends. Server -> browser messages are built by shared/protocol.py.
 
     hello       {"version", "name", "character"}   first message
+    character   {"character"}                       change fighter, in the lobby
+    stage       {"stage"}                           pick the map, in the lobby (host only)
     ready       {"ready": bool}                     in the lobby
     calibrate   {"calibration": {"center_x", "shoulder_y", "nose_y", "shoulder_width"}}
     landmarks   {"frame": {"t", "pose", "hands"}}  every camera frame (shared/landmarks.py format)
@@ -20,9 +22,10 @@ from __future__ import annotations
 import json
 import math
 
-VERSION = 2
+VERSION = 3
 MAX_MESSAGE_BYTES = 16384
 CHARACTERS = ("efros", "ng", "liu", "lyons", "oski")  # folders in assets/characters/
+STAGES = ("memorial_glade", "gateway", "sather_gate", "soda_hall")  # STAGES in game/stage.py
 HAND_SIDES = ("Left", "Right", "Unknown")
 POSE_POINTS, HAND_POINTS, MAX_HANDS = 33, 21, 2
 
@@ -106,6 +109,14 @@ def validate_client(message: dict) -> dict:
             raise ProtocolError("name must contain 1–24 printable characters")
         if message["character"] not in CHARACTERS:
             raise ProtocolError(f"character must be one of {', '.join(CHARACTERS)}")
+    elif kind == "character":
+        _keys(message, ("type", "character"))
+        if message["character"] not in CHARACTERS:
+            raise ProtocolError(f"character must be one of {', '.join(CHARACTERS)}")
+    elif kind == "stage":
+        _keys(message, ("type", "stage"))
+        if message["stage"] not in STAGES:
+            raise ProtocolError(f"stage must be one of {', '.join(STAGES)}")
     elif kind == "ready":
         _keys(message, ("type", "ready"))
         if type(message["ready"]) is not bool:

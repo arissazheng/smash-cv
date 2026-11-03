@@ -52,7 +52,7 @@ def build_examples() -> dict[str, dict]:
         room="ABCD",
         link="https://example.com/",
         host=0,
-        stage="Memorial Glade",
+        stage="gateway",
         phase="lobby",
         capacity=2,
         players=[

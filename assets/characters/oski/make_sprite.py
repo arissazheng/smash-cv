@@ -16,6 +16,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from poses import Limbs  # noqa: E402
 from pixel_sprite import Canvas, save  # noqa: E402
 
 NAME = "Oski the Bear"
@@ -31,6 +32,9 @@ PALETTE = {
     "pants": "#24335f", "pants_dark": "#182240",
     "shoe": "#1c1716",
 }
+
+# Sleeve and hand colors for the generated action poses (see ../poses.py)
+LIMBS = Limbs("sweater", "sweater_light", "glove", "glove_shade")
 
 
 def front() -> Canvas:
@@ -163,4 +167,4 @@ def side() -> Canvas:
 
 
 if __name__ == "__main__":
-    save(Path(__file__).resolve().parent, front(), side(), NAME)
+    save(Path(__file__).resolve().parent, front(), side(), NAME, LIMBS)

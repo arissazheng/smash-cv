@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from poses import Limbs  # noqa: E402
 from pixel_sprite import H, W, Canvas, save  # noqa: E402
 
 NAME = "Prof. Alyosha Efros"
@@ -31,6 +32,9 @@ PALETTE = {
     "shoe": "#1c1716", "shoe_light": "#4a403b",
     "clicker": "#26262c", "clicker_light": "#e5484d",
 }
+
+# Sleeve and hand colors for the generated action poses (see ../poses.py)
+LIMBS = Limbs("shirt", "shirt_light", "skin", "skin_shade")
 
 
 def front() -> Canvas:
@@ -185,4 +189,4 @@ def side() -> Canvas:
 
 
 if __name__ == "__main__":
-    save(Path(__file__).resolve().parent, front(), side(), NAME)
+    save(Path(__file__).resolve().parent, front(), side(), NAME, LIMBS)

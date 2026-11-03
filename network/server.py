@@ -28,6 +28,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request, Response
 
 from game.engine import GameWorld
+from game.stage import DEFAULT_STAGE, STAGES
 from gestures.recognizer import GestureRecognizer
 from network.protocol import MAX_MESSAGE_BYTES, ProtocolError, decode, encode, validate_client
 from shared import config, protocol
@@ -151,6 +152,7 @@ class GameServer:
         self.room = "".join(random.choices(string.ascii_uppercase, k=4))
         self.public_url = public_url
         self.sessions: dict[int, Session] = {}
+        self.stage_id = DEFAULT_STAGE  # the host picks in the lobby
         self.world: GameWorld | None = None
         self.tick_overruns = 0
         self._server = None
@@ -221,9 +223,12 @@ class GameServer:
     def _lobby(self):
         players = [protocol.LobbyPlayer(s.player_id, s.name, s.character, s.ready, not s.closed, s.rematch)
                    for s in sorted(self.sessions.values(), key=lambda s: s.player_id)]
-        self._broadcast(protocol.lobby(self.room, self.link, min(self.sessions, default=None),
-                                       self.world.stage.name if self.world else "Memorial Glade",
+        self._broadcast(protocol.lobby(self.room, self.link, self._host(), self.stage_id,
                                        self._phase(), self.capacity, players))
+
+    def _host(self) -> int | None:
+        """The first player to join (lowest id still connected) picks the stage."""
+        return min(self.sessions, default=None)
 
     def _snapshot(self):
         if self.world is not None:
@@ -240,7 +245,8 @@ class GameServer:
                 or not all(s.ready for s in self.sessions.values())):
             return
         now = asyncio.get_running_loop().time()
-        self.world = GameWorld(sorted(self.sessions), stocks=self.stocks, match_id=uuid4().hex)
+        stage = STAGES[self.stage_id](len(self.sessions))
+        self.world = GameWorld(sorted(self.sessions), stage=stage, stocks=self.stocks, match_id=uuid4().hex)
         for fighter in self.world.fighters:
             fighter.character = self.sessions[fighter.player_id].character
         self.world.phase = "countdown"
@@ -296,6 +302,12 @@ class GameServer:
                 if kind == "landmarks":
                     if self.world and self.world.phase == "playing":
                         session.accept_frame(message["frame"], now)
+                elif kind == "character" and self.world is None:
+                    session.character = message["character"]
+                    self._lobby()
+                elif kind == "stage" and self.world is None and session.player_id == self._host():
+                    self.stage_id = message["stage"]
+                    self._lobby()
                 elif kind == "calibrate":
                     session.set_calibration(message["calibration"])
                 elif kind == "ready" and self.world is None:

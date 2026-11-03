@@ -13,6 +13,7 @@ import { drawFighter, drawMessage, drawStage } from "./draw.js";
 import { Effects } from "./effects.js";
 import { drawHud } from "./hud.js";
 import { SnapshotBuffer } from "./interpolation.js";
+import { SpriteSet } from "./sprites.js";
 import { GAME_HEIGHT, GAME_WIDTH } from "./protocol.js";
 
 const now = () => performance.now() / 1000;
@@ -37,6 +38,7 @@ export class Renderer {
     this.lobby = null; // latest lobby message, for the lobby screen
     this.assetBase = assetBase;
     this.background = null; // stage art, once loaded
+    this.sprites = new SpriteSet(assetBase);
     this._running = false;
   }
 
@@ -50,7 +52,7 @@ export class Renderer {
       this.effects = new Effects(GAME_WIDTH, GAME_HEIGHT);
       this.background = null;
       this._loadBackground(message.stage.background);
-      // TODO(Person 4): load each player's sprite atlas here.
+      for (const player of message.players) this.sprites.load(player.character);
     } else if (message.type === "snapshot") {
       this.buffer.push(message, arrival);
     } else if (message.type === "event") {
@@ -96,6 +98,7 @@ export class Renderer {
         stateTime: this._stateTime(fighter, time),
         time,
         showHitboxes: this.showHitboxes,
+        sprite: this.sprites.frame(fighter.character, fighter.state, this._stateTime(fighter, time)),
       });
     }
     this.effects.draw(ctx, time);

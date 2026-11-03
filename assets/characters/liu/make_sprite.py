@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from poses import Limbs  # noqa: E402
 from pixel_sprite import Canvas, save  # noqa: E402
 
 NAME = "Dean Tsu-Jae King Liu"
@@ -29,6 +30,9 @@ PALETTE = {
     "pants": "#262d46", "pants_dark": "#171c2e",
     "shoe": "#141416", "shoe_light": "#3c3c44",
 }
+
+# Sleeve and hand colors for the generated action poses (see ../poses.py)
+LIMBS = Limbs("blazer", "blazer_light", "skin", "skin_shade")
 
 
 def front() -> Canvas:
@@ -163,4 +167,4 @@ def side() -> Canvas:
 
 
 if __name__ == "__main__":
-    save(Path(__file__).resolve().parent, front(), side(), NAME)
+    save(Path(__file__).resolve().parent, front(), side(), NAME, LIMBS)

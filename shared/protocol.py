@@ -41,6 +41,7 @@ def lobby(room: str, link: str, host: int | None, stage: str, phase: str, capaci
           players: list[LobbyPlayer]) -> dict:
     """Sent to everyone whenever anyone joins, leaves, readies up or votes for a rematch.
 
+    `stage` is the id of the stage the host picked (see STAGES in game/stage.py).
     `phase` is "lobby", "countdown", "playing" or "finished".
     """
     return {

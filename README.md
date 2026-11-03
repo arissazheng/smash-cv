@@ -15,8 +15,9 @@ python main.py server                     # --players 2|3|4, --stocks N
 ```
 
 Open the printed link (`http://127.0.0.1:8765/`) in a browser, pick a fighter,
-allow the camera, calibrate, and press Ready. The match starts when every slot
-is ready.
+allow the camera, calibrate, and press Ready. In the lobby you can switch
+fighters, and the host (first to join) picks the stage: Memorial Glade,
+Gateway, Sather Gate or Soda Hall. The match starts when every slot is ready.
 
 **Playing with friends on other computers.** Browsers only allow the camera on
 `https://` pages (or `localhost`), so share an https link to your server, for
@@ -127,11 +128,13 @@ JSON over one WebSocket per player.
 | --- | --- | --- | --- |
 | browser → server | `hello` | protocol version, name, character | First message |
 | browser → server | `calibrate` | center_x, shoulder_y, nose_y, shoulder_width (computed in the browser) | Any time before or during the match |
+| browser → server | `character` | fighter id | In the lobby, to switch fighter |
+| browser → server | `stage` | stage id | In the lobby; only the host's choice counts |
 | browser → server | `ready` | true or false | In the lobby |
 | browser → server | `landmarks` | one `LandmarkFrame` | Every camera frame while playing |
 | browser → server | `rematch`, `leave` | nothing | After game over; when leaving |
 | server → browser | `welcome` | your player id, room code, shareable link | After `hello` |
-| server → browser | `lobby` | room, link, host, stage, phase (`lobby`/`countdown`/`playing`/`finished`), capacity, and each player's name, character, ready, connected and rematch | Whenever any of that changes |
+| server → browser | `lobby` | room, link, host, stage id, phase (`lobby`/`countdown`/`playing`/`finished`), capacity, and each player's name, character, ready, connected and rematch | Whenever any of that changes |
 | server → browser | `match_start` | stage layout and background, players and characters, countdown seconds | When everyone is ready |
 | server → browser | `snapshot` | tick, match time, and for each fighter: id, character, x, y, body size, facing, animation state, damage %, stocks, shield, life_id, invulnerable, active hitbox | About 30 times a second |
 | server → browser | `event` | tick and match time, plus `hit` (attacker, target, attack, damage, shielded, where it landed), `ko` (player, stocks left, where they left), `disconnect` (player) or `game_over` (winner, or null for a draw) | When it happens |
@@ -189,11 +192,11 @@ Find your work with `grep -rn "TODO(Person 2)" .` and so on.
 - **Browser camera tracking** with MediaPipe, sending landmarks to the server.
 - **Detectors:** lean to move, duck to crouch, both hands up to jump, fast wrist to jab, both fists to smash, special, up special, shield, grab, taunt, pause (ignored online), and a fingertip pointer.
 - **Game:** running, double jump, platform drop-through, all five attacks, damage %, knockback that grows with damage, stocks, respawn invulnerability, simultaneous hits that trade.
-- **Browser renderer:** Memorial Glade stage art, smooth movement between snapshots, damage % and stocks, hit sparks, KO bursts, the "GAME!" screen.
-- **Art:** five retro pixel characters and the Memorial Glade stage.
+- **Browser renderer:** stage art, character sprites with a pose for every action (jab, smash, special, up special, grab, jump, hurt, taunt...), smooth movement between snapshots, damage % and stocks, hit sparks, KO bursts, the "GAME!" screen.
+- **Lobby:** stage picker (host) and fighter switching.
+- **Art:** five retro pixel characters with generated action poses, and four stages: Memorial Glade, Gateway, Sather Gate and Soda Hall.
 
-Not built yet: drawing character sprites in the browser (fighters are still
-boxes), pointer-driven menus, more stages, sound.
+Not built yet: hand-drawn multi-frame animations, pointer-driven menus, sound.
 
 ## Conventions
 
@@ -211,9 +214,15 @@ easy to tweak and regenerate:
   left and right views) on the shared toolkit in `assets/characters/pixel_sprite.py`.
   `assets/characters/make_roster.py` builds `roster.png`. Playable characters are
   listed in `client/characters.js` and `CHARACTERS` in `network/protocol.py`.
-- `assets/stages/make_memorial_glade.py` draws Memorial Glade at 640x360, shown
-  at 2x. Its platforms must match `battlefield()` in `game/stage.py`;
-  `tests/test_stage_art.py` fails if they drift apart.
+- `assets/characters/poses.py` generates a pose for every game state from each
+  character's side view (each character names its sleeve and hand colors), and
+  `pixel_sprite.save()` writes `<character>/<state>/frame_XX.png`,
+  `sprites.json` (frame counts, read by the browser) and `actions.png`.
+- `assets/stages/make_<stage>.py` draws each stage at 640x360, shown at 2x, on
+  the shared toolkit in `assets/stages/stage_art.py`. Platforms come from
+  `STAGES` in `game/stage.py`; `tests/test_stage_art.py` fails if art and
+  platforms drift apart. To add a stage: add its layout to `STAGES`, its id to
+  `network/protocol.py` and `client/stages.js`, and a `make_<stage>.py`.
 
 Sprite frames go in `assets/characters/<character>/<state>/frame_XX.png`. State
 names: idle, run, jump, fall, crouch, shield, hurt, taunt, jab, smash, special,

@@ -7,7 +7,7 @@
 // controller inputs; the server runs the gesture recognizer). The server's
 // messages are passed to every listener, e.g. Renderer.receive.
 
-export const PROTOCOL_VERSION = 2; // must match VERSION in network/protocol.py (a test checks)
+export const PROTOCOL_VERSION = 3; // must match VERSION in network/protocol.py (a test checks)
 
 export function serverUrl(location = globalThis.location) {
   const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -53,6 +53,16 @@ export class Connection {
 
   hello(name, character) {
     this.send({ type: "hello", version: PROTOCOL_VERSION, name, character });
+  }
+
+  /** Change fighter while in the lobby. */
+  character(character) {
+    this.send({ type: "character", character });
+  }
+
+  /** Pick the map while in the lobby (the server ignores this from anyone but the host). */
+  stage(stage) {
+    this.send({ type: "stage", stage });
   }
 
   ready(ready = true) {

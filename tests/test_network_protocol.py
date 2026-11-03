@@ -24,6 +24,7 @@ def calibrate(**changes):
 
 def test_valid_messages_pass():
     for message in (hello(), {"type": "ready", "ready": True}, {"type": "rematch"}, {"type": "leave"},
+                    {"type": "stage", "stage": "gateway"}, {"type": "character", "character": "oski"},
                     calibrate(), landmarks(), landmarks(pose=None, hands=[])):
         assert validate_client(decode(encode(message))) == message
 
@@ -32,6 +33,7 @@ def test_valid_messages_pass():
     hello(version=1), hello(name=""), hello(name="x" * 25), hello(name="bad\nname"),
     hello(character="mario"), hello(player_id=3),
     {"type": "ready", "ready": "yes"}, {"type": "rematch", "now": True},
+    {"type": "stage", "stage": "moon"}, {"type": "stage"}, {"type": "character", "character": "mario"},
     calibrate(shoulder_width=0), calibrate(center_x=2), calibrate(nose_y="0.4"),
     landmarks(pose=[[0.5, 0.5, 0, 1]] * 5),                 # wrong number of body points
     landmarks(pose=[[0.5, 0.5, 0]] * 33),                    # points missing visibility

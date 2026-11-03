@@ -14,75 +14,15 @@ island top is y=260 from x=120 to 519, and the three ledges sit at y=190
 move them here too.
 """
 
-from pathlib import Path
-
-import cv2
 import numpy as np
 
-W, H = 640, 360
-HERE = Path(__file__).resolve().parent
-CHARACTERS = HERE.parent / "characters"
+from stage_art import H, W, Picture, save, stone_wall, tree
+
 rng = np.random.default_rng(7)  # fixed seed: same picture every run
 
 # Play-area geometry (half of game/stage.py battlefield()).
 MAIN = (120, 260, 519)                                  # x0, top, x1
 LEDGES = [(170, 190, 259), (380, 190, 469), (275, 125, 364)]
-
-BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]) / 16
-
-
-def rgb(hex_color: str) -> np.ndarray:
-    return np.array([int(hex_color[i:i + 2], 16) for i in (1, 3, 5)], np.uint8)
-
-
-OUTLINE = rgb("#1d1a24")
-
-
-class Picture:
-    def __init__(self):
-        self.px = np.zeros((H, W, 3), np.uint8)
-
-    def rect(self, x0, y0, x1, y1, color, mask=None):
-        x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, W - 1), min(y1, H - 1)
-        if x0 > x1 or y0 > y1:
-            return
-        c = rgb(color) if isinstance(color, str) else color
-        self.px[y0:y1 + 1, x0:x1 + 1] = c
-        if mask is not None:
-            mask[y0:y1 + 1, x0:x1 + 1] = True
-
-    def put(self, x, y, color):
-        if 0 <= x < W and 0 <= y < H:
-            self.px[y, x] = rgb(color)
-
-    def ellipse(self, cx, cy, rx, ry, color, mask=None):
-        ys, xs = np.ogrid[:H, :W]
-        inside = ((xs + 0.5 - cx) / rx) ** 2 + ((ys + 0.5 - cy) / ry) ** 2 <= 1
-        self.px[inside] = rgb(color)
-        if mask is not None:
-            mask |= inside
-        return inside
-
-    def gradient(self, y0, y1, colors, x0=0, x1=W - 1):
-        """Vertical gradient through `colors`, ordered-dithered like old consoles."""
-        cols = [rgb(c).astype(float) for c in colors]
-        steps = len(cols) - 1
-        for y in range(y0, y1 + 1):
-            t = (y - y0) / max(1, y1 - y0) * steps
-            i = min(int(t), steps - 1)
-            frac = t - i
-            for x in range(x0, x1 + 1):
-                self.px[y, x] = cols[i + 1] if frac > BAYER4[y % 4, x % 4] else cols[i]
-
-    def outline(self, mask):
-        """Dark 1-pixel border around a shape."""
-        grown = mask.copy()
-        grown[1:] |= mask[:-1]
-        grown[:-1] |= mask[1:]
-        grown[:, 1:] |= mask[:, :-1]
-        grown[:, :-1] |= mask[:, 1:]
-        self.px[grown & ~mask] = OUTLINE
-
 
 def sky(p: Picture):
     p.gradient(0, 235, ["#3d7fd6", "#5596e2", "#72ade9", "#93c4f0", "#b7dbf6"])
@@ -173,19 +113,10 @@ def campanile(p: Picture, cx=445):
     p.put(cx, 13, "#d9b54a")
 
 
-def tree(p: Picture, cx, cy, r):
-    p.rect(cx - 1, cy + r - 3, cx + 1, cy + r + 6, "#5b3a26")
-    p.ellipse(cx, cy, r * 1.15, r, "#2d6a37")
-    p.ellipse(cx - r * 0.25, cy - r * 0.25, r * 0.8, r * 0.7, "#3f8a47")
-    for _ in range(int(r * 2)):
-        a, d = rng.random() * 6.28, rng.random() * r * 0.7
-        p.put(int(cx - r * 0.3 + np.cos(a) * d), int(cy - r * 0.35 + np.sin(a) * d * 0.8), "#62ad5c")
-
-
 def trees(p: Picture):
     for cx, cy, r in [(36, 224, 13), (118, 226, 11), (176, 219, 15), (222, 225, 11), (300, 214, 19),
                       (344, 221, 16), (392, 212, 21), (420, 226, 10), (512, 224, 14), (598, 227, 12)]:
-        tree(p, cx, cy, r)
+        tree(p, cx, cy, r, rng)
 
 
 def lawn(p: Picture):
@@ -203,28 +134,6 @@ def lawn(p: Picture):
         p.rect(x, y, x + 9, y + 3, color)
         p.rect(x + 2, y + 1, x + 6, y + 1, "#2a1f1a")      # someone lying on it
         p.rect(x + 7, y, x + 8, y + 1, "#f0c39a")
-
-
-def stone_wall(p: Picture, mask, x0, x1, y0, y1, taper=0.0):
-    """Granite blocks with mortar lines, optionally narrowing toward the bottom."""
-    for y in range(y0, y1 + 1):
-        inset = int((y - y0) * taper)
-        a, b = x0 + inset, x1 - inset
-        if a > b:
-            break
-        row = (y - y0) // 6
-        for x in range(a, b + 1):
-            joint = (x + (8 if row % 2 else 0)) % 16 == 0
-            if (y - y0) % 6 == 5 or joint:
-                c = "#8f8775"
-            elif x - a < 3:
-                c = "#ddd6c4"
-            elif b - x < 4 or y > y1 - 4:
-                c = "#a59d8a"
-            else:
-                c = "#c8c0ad"
-            p.put(x, y, c)
-        mask[y, a:b + 1] = True
 
 
 def grass_top(p: Picture, mask, x0, x1, y, depth=5):
@@ -257,7 +166,7 @@ def play_area(p: Picture):
                 p.put(x, y_ - 1, "#7ad35a")
 
 
-def build() -> np.ndarray:
+def build() -> Picture:
     p = Picture()
     sky(p)
     hills(p)
@@ -266,35 +175,11 @@ def build() -> np.ndarray:
     trees(p)
     lawn(p)
     play_area(p)
-    return cv2.cvtColor(p.px, cv2.COLOR_RGB2BGR)
-
-
-def preview(bg: np.ndarray) -> np.ndarray:
-    """The stage at game size with the roster standing on it."""
-    scene = cv2.cvtColor(bg, cv2.COLOR_BGR2BGRA)
-    cast = [  # (character, view, feet x, feet y) in stage pixels
-        ("efros", "right", 214, LEDGES[0][1]), ("ng", "right", 200, MAIN[1]),
-        ("liu", "front", 320, LEDGES[2][1]), ("lyons", "left", 440, MAIN[1]),
-        ("oski", "left", 425, LEDGES[1][1]),
-    ]
-    for name, view, fx, fy in cast:
-        sprite = cv2.imread(str(CHARACTERS / name / "views" / f"{view}.png"), cv2.IMREAD_UNCHANGED)
-        if sprite is None:
-            continue
-        h, w = sprite.shape[:2]
-        x, y = fx - w // 2, fy - h
-        region = scene[y:y + h, x:x + w]
-        alpha = sprite[:, :, 3:4] / 255.0
-        region[:] = (sprite * alpha + region * (1 - alpha)).astype(np.uint8)
-    big = cv2.resize(scene, (W * 2, H * 2), interpolation=cv2.INTER_NEAREST)
-    return big
+    return p
 
 
 def main():
-    bg = build()
-    cv2.imwrite(str(HERE / "memorial_glade.png"), bg)
-    cv2.imwrite(str(HERE / "memorial_glade_preview.png"), preview(bg))
-    print(f"wrote memorial_glade.png and memorial_glade_preview.png in {HERE}")
+    save("memorial_glade", build(), MAIN, LEDGES)
 
 
 if __name__ == "__main__":

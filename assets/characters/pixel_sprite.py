@@ -8,11 +8,17 @@ outline(), then calls save(). save() mirrors the left view into the right view
 and writes:
 
     <character>/views/front.png, left.png, right.png   32x44, transparent
-    <character>/idle/frame_00.png                       facing right, what the game loads
-    <character>/preview.png                             all three views at 8x on a shelf
+    <character>/<state>/frame_00.png, ...               one folder per game state, facing right
+    <character>/sprites.json                            frame counts per state, for the browser
+    <character>/preview.png                             the three views at 8x on a shelf
+    <character>/actions.png                             every state's pose, for review
+
+Action poses come from poses.py, drawn over the side view.
 """
 
+import json
 from pathlib import Path
+import shutil
 
 import cv2
 import numpy as np
@@ -129,18 +135,35 @@ def preview(views: dict[str, np.ndarray], scale: int = 8, title: str | None = No
     return sheet
 
 
-def save(folder: Path, front: Canvas, left: Canvas, name: str) -> None:
-    """Mirror left into right and write every output file. `name` titles the preview.
+FRAME_TIME = 0.12  # seconds per animation frame
 
-    Call outline() on each canvas first, then add any inner lines.
+
+def save(folder: Path, front: Canvas, left: Canvas, name: str, limbs) -> None:
+    """Write views, one frame folder per game state, the manifest and previews.
+
+    Call outline() on each canvas first, then add any inner lines. `limbs`
+    (poses.Limbs) says which colors are the sleeve and hand for action poses.
     """
+    from poses import pose_frames  # here so poses.py can import Canvas from this module
+
     left_img = left.to_bgra()
     views = {"left": left_img, "front": front.to_bgra(), "right": cv2.flip(left_img, 1)}
-
     (folder / "views").mkdir(exist_ok=True)
     for view, img in views.items():
         cv2.imwrite(str(folder / "views" / f"{view}.png"), img)
-    (folder / "idle").mkdir(exist_ok=True)
-    cv2.imwrite(str(folder / "idle" / "frame_00.png"), views["right"])  # game sprites face right
     cv2.imwrite(str(folder / "preview.png"), preview(views, title=name))
-    print(f"wrote views/, idle/frame_00.png and preview.png in {folder}")
+
+    states = pose_frames(left, limbs)
+    for state, frames in states.items():
+        state_dir = folder / state
+        if state_dir.exists():
+            shutil.rmtree(state_dir)  # drop frames from an older version
+        state_dir.mkdir()
+        for i, canvas in enumerate(frames):  # game sprites face right
+            cv2.imwrite(str(state_dir / f"frame_{i:02d}.png"), cv2.flip(canvas.to_bgra(), 1))
+    manifest = {"frame_time": FRAME_TIME, "states": {s: len(f) for s, f in states.items()}}
+    (folder / "sprites.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+    actions = {state.replace("_", " "): cv2.flip(frames[0].to_bgra(), 1) for state, frames in states.items()}
+    cv2.imwrite(str(folder / "actions.png"), preview(actions, scale=5, title=f"{name}: actions"))
+    print(f"wrote views, {len(states)} states, sprites.json and previews in {folder}")

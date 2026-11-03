@@ -23,17 +23,17 @@ export const MEMORIAL_GLADE = {
 
 const GROUND_Y = 520;
 const BODY = { w: 60, h: 90 };
-const KO_EVERY = 15;     // seconds between the squirrel's KOs
-export const MATCH_LENGTH = 3 * KO_EVERY; // squirrel has 3 stocks
+const KO_EVERY = 15;     // seconds between Oski's KOs
+export const MATCH_LENGTH = 3 * KO_EVERY; // Oski has 3 stocks
 const RESTART_AFTER = 4; // seconds of "GAME!" before a new match
 
 /** Where each scripted fighter is at time t (seconds). Pure, so tests can call it. */
 export function scriptedFighters(t) {
-  return [bear(t), squirrel(t)];
+  return [lyons(t), oski(t)];
 }
 
-// Player 1 runs back and forth, jumps every 2.4 s and jabs every 1.5 s.
-function bear(t) {
+// Player 1 (Lyons) runs back and forth, jumps every 2.4 s and jabs every 1.5 s.
+function lyons(t) {
   const x = 640 + 280 * Math.sin(t * 0.9);
   const facing = Math.cos(t * 0.9) >= 0 ? 1 : -1;
   const jumpPhase = t % 2.4;
@@ -48,7 +48,7 @@ function bear(t) {
 
   return {
     id: 0,
-    character: "golden_bear",
+    character: "lyons",
     x, y, ...BODY, facing, state,
     damage: (Math.floor(t / 5) * 4) % 160,
     stocks: 3,
@@ -59,15 +59,15 @@ function bear(t) {
   };
 }
 
-// Player 2 wanders slowly, gets hit every 3 s, shields now and then, and is
+// Player 2 (Oski) wanders slowly, gets hit every 3 s, shields now and then, and is
 // KO'd every 15 s.
-function squirrel(t) {
+function oski(t) {
   const x = 640 - 200 * Math.sin(t * 0.5);
   const hurt = t % 3 < 0.4;
   const shield = !hurt && t % 7 > 6;
   return {
     id: 1,
-    character: "campus_squirrel",
+    character: "oski",
     x, y: GROUND_Y, ...BODY,
     facing: Math.cos(t * 0.5) >= 0 ? -1 : 1,
     state: hurt ? "hurt" : shield ? "shield" : "run",
@@ -119,8 +119,8 @@ export class FakeServer {
       type: "match_start",
       stage: MEMORIAL_GLADE,
       players: [
-        { id: 0, name: "Arissa", character: "golden_bear" },
-        { id: 1, name: "CPU", character: "campus_squirrel" },
+        { id: 0, name: "Arissa", character: "lyons" },
+        { id: 1, name: "CPU", character: "oski" },
       ],
     });
     this._start = performance.now() / 1000;
