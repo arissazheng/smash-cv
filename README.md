@@ -1,8 +1,9 @@
 # Smash CV
 
-A Smash Bros-style fighter where your laptop camera is the controller. Punch at
-the camera and your character punches. Lean to run, throw your hands up to
-jump.
+An online Smash Bros-style fighter where your laptop camera is the controller.
+Punch at the camera and your character punches. Lean to run, throw your hands
+up to jump. Friends join a match from their own computers through a shared
+link.
 
 ## Setup
 
@@ -16,6 +17,9 @@ python tools/download_models.py    # MediaPipe pose + gesture models into models
 ```
 
 ## Run
+
+These commands run the local, single-computer harness. The online server and
+browser client are not built yet (see Architecture).
 
 ```bash
 python main.py overlay                     # camera debug view: skeleton, gestures, live ControllerState
@@ -32,81 +36,118 @@ Close the game window to quit. In the overlay and recorder windows, press `q`.
 
 ## Architecture
 
+Smash CV is an online multiplayer game. One player creates a room and shares
+the link (`https://<host>/room/ABCD`). Each player opens it in their own
+browser and plays with their own laptop camera.
+
 ```mermaid
 flowchart LR
-    subgraph P1["Person 1 · vision/"]
-        CAM["Webcam thread<br/>camera.py"] --> MP["MediaPipe Pose + Gesture Recognizer<br/>pose.py"]
-        MP --> SM["Smoothing + calibration<br/>smoothing.py · calibration.py"]
+    subgraph BROWSER["Each player's browser · client/"]
+        direction TB
+        CAM["Webcam<br/>getUserMedia"] --> MPJS["MediaPipe pose + hands (JS)<br/>client/vision/ · Person 1"]
+        MPJS --> OVL["Overlay + calibration screen<br/>client/vision/ · Person 1"]
+        NETC["WebSocket client<br/>client/net.js · Person 3"]
+        RND["Canvas renderer, HUD, lobby, menus<br/>client/render/ · Person 4"]
+        ART[("Sprites + stages<br/>assets/ · Person 4")] --> RND
     end
 
-    subgraph P2["Person 2 · gestures/"]
-        REC["Gesture recognizer<br/>detectors.py · recognizer.py"]
-        CLIPS[("Recorded clips<br/>recordings/*.jsonl")]
+    subgraph SERVER["Game server · Python"]
+        direction TB
+        WS["HTTP + WebSocket server<br/>server/app.py · Person 3"]
+        ROOMS["Rooms + shareable links<br/>server/rooms.py · Person 3"]
+        subgraph ROOM["One room, up to 4 players"]
+            direction TB
+            REC["Gesture recognizer, one per player<br/>gestures/ · Person 2"]
+            CS{{"ControllerState<br/>shared/controller_state.py"}}
+            LOOP["Game loop, 60 ticks/s<br/>game/ · Person 3"]
+            CPU["CPU opponent<br/>game/cpu.py"]
+            REC --> CS --> LOOP
+            CPU --> LOOP
+        end
+        WS --> ROOMS --> ROOM
     end
 
-    subgraph CTRL["controllers/"]
-        CC["CameraController"]
-        RC["ReplayController"]
-    end
-
-    CS{{"ControllerState<br/>shared/controller_state.py"}}
-
-    subgraph P3["Person 3 · game/"]
-        ENG["Game loop<br/>engine.py"] --> FIG["Fighters + physics<br/>fighter.py"]
-        FIG --> COM["Hitboxes + knockback<br/>combat.py"]
-        STG["Stage layout<br/>stage.py"] --> FIG
-        CPU["CPU opponent<br/>cpu.py"]
-    end
-
-    subgraph P4["Person 4 · ui/"]
-        RND["Renderer + HUD + menus<br/>render.py · hud.py · menus.py"]
-        SP["Sprite pipeline (OpenCV)<br/>sprite_pipeline.py"]
-        ART[("assets/<br/>characters · stages")]
-    end
-
-    SM -- LandmarkFrame --> CC
-    CLIPS -- LandmarkFrame --> RC
-    CC --> REC
-    RC --> REC
-    REC --> CS
-    CS -- "poll() each tick" --> ENG
-    CPU -- player 2 --> ENG
-    ENG --> RND
-    SP --> ART --> RND
-    RND --> SCREEN["pygame window"]
+    MPJS -- "landmarks, ~30/s" --> NETC
+    NETC -- "landmarks" --> WS
+    LOOP -- "snapshot, ~30/s" --> WS
+    WS -- "snapshot" --> NETC
+    NETC --> RND
+    OTHERS["Other players' browsers"] <-->|"same messages"| WS
 ```
 
-Data moves left to right. The camera thread runs at camera speed (about 30
-fps) and the game loop at 60 fps. Each tick, the game asks every controller
-for its latest `ControllerState`.
+**What happens in one round trip**
+
+1. The browser reads the camera and runs MediaPipe locally. Video never leaves the player's laptop.
+2. The browser sends that frame's landmarks (about 3 KB of JSON) over a WebSocket.
+3. The server runs that player's gesture recognizer, which turns landmarks into a `ControllerState`.
+4. The room's game loop applies every player's `ControllerState`, steps physics and resolves hits, 60 times a second.
+5. About 30 times a second, the server sends every browser a snapshot of where each fighter is and what it is doing.
+6. Each browser draws the snapshot, smoothing between the last two so movement looks fluid.
+
+**Why it's built this way**
+
+- **Landmarks, not video, go over the network.** Landmarks are about 100 KB/s per player, video would be several MB/s, and nobody's camera feed leaves their computer.
+- **Gesture recognition runs on the server.** Person 2's Python detectors, tests and recorded clips work unchanged, and the server decides what every player did, so no browser can fake an input.
+- **The server owns the game.** All players see the same match. The server runs the existing `game/` code without opening a window.
+- **The link must be HTTPS.** Browsers only allow camera access on `https://` pages (or `localhost`). For a demo, run the server on one laptop and share it through a tunnel such as Cloudflare Tunnel or ngrok, or deploy it to a host like Fly.io or Render.
+
+### Messages
+
+All messages are JSON over one WebSocket per player. They are defined in `shared/protocol.py`. Like `ControllerState`, change them only when all four of us agree.
+
+| Direction | Message | Contents | When |
+| --- | --- | --- | --- |
+| browser → server | `join` | room code, name, character | Opening the link |
+| browser → server | `calibrate` | about 2 s of landmark frames while sitting neutral | Before the first match |
+| browser → server | `landmarks` | one `LandmarkFrame` | Every camera frame |
+| server → browser | `lobby` | players in the room, characters, who is ready | When anyone joins, leaves or picks |
+| server → browser | `snapshot` | tick number, and each fighter's position, animation state, facing, damage % and stocks | About 30 times a second |
+| server → browser | `event` | hit, KO, game over | When it happens |
+
+### Data types
 
 | Type | Defined in | Produced by | Consumed by |
 | --- | --- | --- | --- |
-| `LandmarkFrame` | `shared/landmarks.py` | `vision/pose.py`, recordings | `gestures/` |
-| `Calibration` | `vision/calibration.py` | `main.py calibrate` | `gestures/detectors.py` |
+| `LandmarkFrame` | `shared/landmarks.py` | MediaPipe in the browser, recordings | `gestures/` on the server |
+| `Calibration` | `vision/calibration.py` | the `calibrate` message | `gestures/detectors.py` |
 | `ControllerState` | `shared/controller_state.py` | `gestures/recognizer.py`, `game/cpu.py` | `game/` |
-| `Fighter.state` (animation name) | `game/fighter.py` | `game/` | `ui/render.py` |
+| Snapshot | `shared/protocol.py` | `server/` from `game/` | `client/render/` |
 
-The game only ever calls `controller.poll()` and gets a `ControllerState`
-(`shared/controller_state.py`). That file is the contract between the vision
-side and the game side: **change it only when all four of us agree.**
+### Testing without a camera
 
-There is no keyboard controller. For testing, record gestures once and replay
-them: `ReplayController` feeds a recording through the same gesture recognizer
-a live camera uses.
+There is no keyboard controller. `ReplayController` feeds recorded clips
+through the same gesture recognizer the server uses, so detectors and game
+logic can be tested with `pytest` or the local `main.py` harness. A replay
+client that sends a recording over the WebSocket can stand in for a second
+player when testing the server alone.
 
 ## Who owns what
 
-| Folder | Owner | What's there | Start here |
+| Area | Owner | Runs where | What's there |
 | --- | --- | --- | --- |
-| `vision/` | Person 1 | Camera thread, MediaPipe wrapper, smoothing, calibration, debug overlay | `TODO(Person 1)` in `vision/pose.py`, `vision/smoothing.py` |
-| `gestures/` | Person 2 | Gesture detectors, recognizer (edges and cooldowns), recorder | Stubs at the bottom of `gestures/detectors.py` |
-| `controllers/` | Person 1 + 2 | Camera and replay controllers | |
-| `game/` | Person 3 | Physics, fighters, combat, stage, CPU, game loop | `TODO(Person 3)` in `game/` |
-| `ui/` | Person 4 | Rendering, sprites, HUD, menus, OpenCV sprite pipeline | `TODO(Person 4)` in `ui/` |
-| `shared/` | Everyone | The ControllerState contract, landmark types, config | |
+| `client/vision/` | Person 1 | Browser (JavaScript) | Camera, MediaPipe for the web, smoothing, overlay, calibration screen |
+| `vision/` | Person 1 | Local harness (Python) | Python version of the same, used by `main.py` and the recorder |
+| `gestures/` | Person 2 | Server (Python) | Detectors, recognizer (edges and cooldowns), clip recorder |
+| `server/`, `client/net.js` | Person 3 | Server + browser | WebSocket server, rooms and links, the snapshot loop |
+| `game/` | Person 3 | Server (Python) | Physics, fighters, combat, stage, CPU |
+| `client/render/` | Person 4 | Browser (JavaScript) | Canvas renderer, HUD, lobby, character select, pointer menus |
+| `ui/sprite_pipeline.py`, `assets/` | Person 4 | Offline tool (Python) | OpenCV sprite slicing, sprites and stages |
+| `shared/` | Everyone | Both | `ControllerState`, landmark types, message protocol |
 
 Find your work with `grep -rn "TODO(Person 2)" .` and so on.
+
+### Moving from the current code
+
+The code in the repo today is the single-computer version: everything runs in
+one Python process and draws with pygame. Most of it carries over as is.
+
+| Today | Online version |
+| --- | --- |
+| `gestures/`, `game/` | Unchanged, run on the server |
+| `vision/` (Python MediaPipe) | Ported to `client/vision/` with MediaPipe for the web. The Python version stays for the recorder and local testing |
+| `ui/render.py`, `ui/hud.py` (pygame) | Ported to `client/render/` (HTML canvas) |
+| `controllers/camera_controller.py` | Replaced by the server feeding each player's landmarks to their recognizer |
+| `main.py` | Kept as a local harness for testing without the server |
 
 ## What works today (phase 1 starting point)
 
@@ -118,7 +159,10 @@ Find your work with `grep -rn "TODO(Person 2)" .` and so on.
 - Sprite sheet slicer (background removal + contour detection)
 
 Still stubs: special, up special, shield, grab, taunt, pause detectors; menus;
-real sprites; second camera player.
+real sprites.
+
+Not built yet: the game server, rooms and shareable links, the browser client
+and the message protocol.
 
 ## Conventions
 
