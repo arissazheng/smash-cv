@@ -46,7 +46,6 @@ class PoseTracker:
 
         pose = None
         if pose_result.pose_landmarks:
-            # TODO(Person 1): with num_poses=2, decide which pose is which player (left/right half).
             pose = [(p.x, p.y, p.z, p.visibility or 0.0) for p in pose_result.pose_landmarks[0]]
 
         hands = []

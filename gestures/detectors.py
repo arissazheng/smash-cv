@@ -6,8 +6,8 @@ Each detector reads LandmarkFrames (never the camera directly), so every one of
 them can be tested on recordings. Distances are measured in shoulder widths
 (see vision/calibration.py) and y grows downward.
 
-v0 (phase 1) detectors are implemented: lean, crouch, hands-up jump, punch,
-pointer. The rest are stubs with the rule from the team plan written out.
+Implemented: lean, crouch, hands-up jump, punch, pointer, special, shield,
+up special, grab, taunt, pause. Phase 2 thresholds are untuned first guesses.
 """
 
 from collections import deque
@@ -131,33 +131,136 @@ class PunchDetector:
         self._pending = None
 
 
-# ---- stubs for phase 2 (Person 2) ---------------------------------------------
+# ---- phase 2 detectors (Person 2) ----------------------------------------------
+# Thresholds are first guesses from the team plan; tune them on recorded clips.
 
-def detect_special(frame: LandmarkFrame, calib: Calibration) -> bool:
-    """"Hadouken": both hands Open_Palm and wrists within ~0.5 shoulder widths of each other."""
-    return False  # TODO(Person 2)
-
-
-def detect_up_special(frame: LandmarkFrame, calib: Calibration) -> bool:
-    """Uppercut (fast upward wrist) or one hand Pointing_Up. Must not collide with hands_up."""
-    return False  # TODO(Person 2)
+def _gesture_hands(frame: LandmarkFrame, gesture: str):
+    return [h for h in frame.hands if h.gesture == gesture]
 
 
-def detect_shield(frame: LandmarkFrame, calib: Calibration) -> bool:
+def detect_special(frame: LandmarkFrame, calib: Calibration, max_gap: float = 0.5) -> bool:
+    """Hadouken: both hands Open_Palm and wrists within ~0.5 shoulder widths of each other.
+    Level check; the recognizer makes it edge-triggered."""
+    if len(_gesture_hands(frame, "Open_Palm")) < 2 or not _visible(frame, LEFT_WRIST, RIGHT_WRIST):
+        return False
+    l, r = frame.pose[LEFT_WRIST], frame.pose[RIGHT_WRIST]
+    return math.hypot(l[0] - r[0], l[1] - r[1]) / calib.shoulder_width <= max_gap
+
+
+def detect_shield(frame: LandmarkFrame, calib: Calibration, face_band: float = 0.6) -> bool:
     """Arms crossed in front of the face: wrists past the body midline, at face height. Held."""
-    return False  # TODO(Person 2)
+    if not _visible(frame, NOSE, LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_WRIST, RIGHT_WRIST):
+        return False
+    p = frame.pose
+    # Crossed = wrists are in the opposite left/right order from the shoulders.
+    crossed = (p[LEFT_WRIST][0] - p[RIGHT_WRIST][0]) * (p[LEFT_SHOULDER][0] - p[RIGHT_SHOULDER][0]) < 0
+    at_face = all(abs(p[w][1] - p[NOSE][1]) / calib.shoulder_width <= face_band for w in (LEFT_WRIST, RIGHT_WRIST))
+    return crossed and at_face
 
 
-def detect_grab(frame: LandmarkFrame, calib: Calibration) -> bool:
-    """A hand goes Open_Palm -> Closed_Fist within ~200 ms. Needs history: make it a class."""
-    return False  # TODO(Person 2)
+class UpSpecialDetector:
+    """Pointing_Up appearing, or a fast upward wrist (uppercut). Suppressed while both hands are up (jump)."""
+
+    def __init__(self, speed_threshold: float = 6.0):
+        self.speed_threshold = speed_threshold
+        self._prev: dict[int, tuple[float, float]] = {}  # wrist -> (y, t)
+        self._was_pointing = False
+
+    def update(self, frame: LandmarkFrame, calib: Calibration) -> bool:
+        pointing = bool(_gesture_hands(frame, "Pointing_Up"))
+        fired = pointing and not self._was_pointing
+        self._was_pointing = pointing
+
+        t = frame.timestamp
+        for w in (LEFT_WRIST, RIGHT_WRIST):
+            if not _visible(frame, w, NOSE):
+                self._prev.pop(w, None)
+                continue
+            y = frame.pose[w][1]
+            prev = self._prev.get(w)
+            self._prev[w] = (y, t)
+            if prev is None or t <= prev[1]:
+                continue
+            speed_up = (prev[0] - y) / calib.shoulder_width / (t - prev[1])
+            if speed_up >= self.speed_threshold and y < frame.pose[NOSE][1]:
+                fired = True
+        return fired and not hands_up(frame, calib)
+
+    def reset(self):
+        self._prev.clear()
+        self._was_pointing = False
 
 
-def detect_taunt(frame: LandmarkFrame, calib: Calibration) -> bool:
-    """Thumb_Up held 0.5 s. Needs history: make it a class like PunchDetector."""
-    return False  # TODO(Person 2)
+class GrabDetector:
+    """A hand goes Open_Palm -> Closed_Fist within `window` seconds."""
+
+    def __init__(self, window: float = 0.2):
+        self.window = window
+        self._open_t: dict[str, float] = {}  # handedness -> last time seen as Open_Palm
+        self._was_fist: set[str] = set()
+
+    def update(self, frame: LandmarkFrame, calib: Calibration) -> bool:
+        fired, fists = False, set()
+        for h in frame.hands:
+            if h.gesture == "Open_Palm":
+                self._open_t[h.handedness] = frame.timestamp
+            elif h.gesture == "Closed_Fist":
+                fists.add(h.handedness)
+                opened = self._open_t.get(h.handedness)
+                if h.handedness not in self._was_fist and opened is not None and frame.timestamp - opened <= self.window:
+                    fired = True
+        self._was_fist = fists
+        return fired
+
+    def reset(self):
+        self._open_t.clear()
+        self._was_fist.clear()
 
 
-def detect_pause(frame: LandmarkFrame, calib: Calibration) -> bool:
-    """One Open_Palm held still for 1 s (and not two palms, which is special)."""
-    return False  # TODO(Person 2)
+class TauntDetector:
+    """Thumb_Up held `hold` seconds. Fires once; release the thumb to re-arm."""
+
+    def __init__(self, hold: float = 0.5):
+        self.hold = hold
+        self._since: Optional[float] = None
+        self._fired = False
+
+    def update(self, frame: LandmarkFrame, calib: Calibration) -> bool:
+        if not _gesture_hands(frame, "Thumb_Up"):
+            self.reset()
+            return False
+        if self._since is None:
+            self._since = frame.timestamp
+        if not self._fired and frame.timestamp - self._since >= self.hold:
+            self._fired = True
+            return True
+        return False
+
+    def reset(self):
+        self._since, self._fired = None, False
+
+
+class PauseDetector:
+    """One Open_Palm held still for `hold` seconds (two palms is special). Fires once; lower the hand to re-arm."""
+
+    def __init__(self, hold: float = 1.0, still: float = 0.3):
+        self.hold, self.still = hold, still  # still: max wrist drift, in shoulder widths
+        self._anchor: Optional[tuple[float, float, float]] = None  # x, y, start time
+        self._fired = False
+
+    def update(self, frame: LandmarkFrame, calib: Calibration) -> bool:
+        palms = _gesture_hands(frame, "Open_Palm")
+        if len(palms) != 1 or len(frame.hands) != 1:
+            self.reset()
+            return False
+        x, y, _ = palms[0].landmarks[0]
+        if self._anchor is None or math.hypot(x - self._anchor[0], y - self._anchor[1]) / calib.shoulder_width > self.still:
+            self._anchor, self._fired = (x, y, frame.timestamp), False
+            return False
+        if not self._fired and frame.timestamp - self._anchor[2] >= self.hold:
+            self._fired = True
+            return True
+        return False
+
+    def reset(self):
+        self._anchor, self._fired = None, False

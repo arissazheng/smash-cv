@@ -40,25 +40,32 @@ class OneEuroFilter:
 
 
 class LandmarkSmoother:
-    """Applies a OneEuroFilter to every pose x/y coordinate.
+    """Applies a OneEuroFilter to every pose and hand x/y coordinate.
 
-    TODO(Person 1): hands are passed through unsmoothed because hand order can
-    swap between frames. Match hands by handedness, then smooth them too.
+    Hands are matched across frames by handedness, so MediaPipe swapping the
+    order of the hands doesn't mix up their filters.
     """
 
     def __init__(self, **filter_kwargs):
         self._kwargs = filter_kwargs
-        self._filters: dict[tuple[int, int], OneEuroFilter] = {}
+        self._filters: dict[tuple, OneEuroFilter] = {}
+
+    def _f(self, key) -> OneEuroFilter:
+        return self._filters.setdefault(key, OneEuroFilter(**self._kwargs))
 
     def __call__(self, frame: LandmarkFrame) -> LandmarkFrame:
         if frame.pose is None:
             self._filters.clear()  # person left the frame; don't smooth across the gap
             return frame
         t = frame.timestamp
-        pose = []
-        for i, (x, y, z, vis) in enumerate(frame.pose):
-            fx = self._filters.setdefault((i, 0), OneEuroFilter(**self._kwargs))
-            fy = self._filters.setdefault((i, 1), OneEuroFilter(**self._kwargs))
-            pose.append((fx(x, t), fy(y, t), z, vis))
-        hands = [Hand(h.handedness, list(h.landmarks), h.gesture, h.gesture_score) for h in frame.hands]
+        pose = [(self._f(("p", i, 0))(x, t), self._f(("p", i, 1))(y, t), z, vis)
+                for i, (x, y, z, vis) in enumerate(frame.pose)]
+        hands = []
+        for h in frame.hands:
+            lm = [(self._f((h.handedness, i, 0))(x, t), self._f((h.handedness, i, 1))(y, t), z)
+                  for i, (x, y, z) in enumerate(h.landmarks)]
+            hands.append(Hand(h.handedness, lm, h.gesture, h.gesture_score))
+        present = {h.handedness for h in frame.hands}
+        for k in [k for k in self._filters if k[0] != "p" and k[0] not in present]:
+            del self._filters[k]  # hand left view; restart its filter
         return LandmarkFrame(t, pose, hands)
