@@ -3,6 +3,8 @@
 Owner: Person 3 (layout) + Person 4 (background art).
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 import pygame
@@ -20,8 +22,11 @@ class Stage:
     background: str | None = None                            # file in assets/stages/
 
 
-def battlefield() -> Stage:
+def battlefield(players: int = 2) -> Stage:
+    if not 2 <= players <= 4:
+        raise ValueError("the prototype supports 2–4 players")
     w, h = config.SCREEN_WIDTH, config.SCREEN_HEIGHT
+    offsets = {2: [-200, 200], 3: [-240, 0, 240], 4: [-300, -100, 100, 300]}
     return Stage(
         name="Battlefield",
         main=pygame.Rect(w // 2 - 400, h - 200, 800, 40),
@@ -30,6 +35,6 @@ def battlefield() -> Stage:
             pygame.Rect(w // 2 + 120, h - 340, 180, 12),
             pygame.Rect(w // 2 - 90, h - 470, 180, 12),
         ],
-        spawns=[(w // 2 - 200, h - 400), (w // 2 + 200, h - 400)],
+        spawns=[(w // 2 + x, h - 400) for x in offsets[players]],
         background=None,  # TODO(Person 4): e.g. "battlefield.png"
     )

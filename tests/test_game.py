@@ -64,3 +64,89 @@ def test_falling_off_costs_a_stock():
 class _Idle:
     def poll(self):
         return ControllerState()
+
+
+def test_simultaneous_final_ko_finishes_as_draw_and_freezes():
+    from game.engine import GameWorld
+    world = GameWorld(stocks=1)
+    for fighter in world.fighters:
+        fighter.x = -1000
+    world.step({})
+    assert world.phase == "finished" and world.result == "draw" and world.winner is None
+    before = world.snapshot()
+    for _ in range(10):
+        world.step({})
+    assert world.snapshot() == before
+    assert [f.stocks for f in world.fighters] == [0, 0]
+
+
+def test_respawn_resets_life_state():
+    f = Fighter(0, 0, 0, on_ground=True, crouching=True, shielding=True,
+                shield_health=-1, taunting=1, attack="jab", attack_time=0.1)
+    f.hit_targets.add(1)
+    f.respawn((400, 300))
+    assert (f.x, f.y) == (400, 300)
+    assert not f.on_ground and not f.crouching and not f.shielding
+    assert not f.hit_targets and f.attack is None and f.attack_time == 0
+    assert f.life_id == 1 and f.invulnerable > 0 and f.taunting == 0
+
+
+def test_attack_hits_new_target_on_later_active_frame_and_can_trade():
+    a = Fighter(0, 600, 520, attack="jab", attack_time=0.06)
+    b = Fighter(1, 660, 520)
+    c = Fighter(2, 900, 520)
+    resolve_hits([a, b, c])
+    c.x = 660
+    resolve_hits([a, b, c])
+    assert b.damage == c.damage == ATTACKS["jab"].damage
+    a = Fighter(0, 600, 520, attack="jab", attack_time=0.06)
+    b = Fighter(1, 660, 520, facing=-1, attack="jab", attack_time=0.06)
+    resolve_hits([a, b])
+    assert a.damage == b.damage == ATTACKS["jab"].damage
+
+
+def test_world_replay_determinism_four_players_and_json_snapshot():
+    import json
+    from game.engine import GameWorld
+    from shared.game_state import MatchView
+    a = GameWorld([0, 2, 4, 6])
+    b = GameWorld([0, 2, 4, 6])
+    for tick in range(180):
+        inputs = {pid: ControllerState(move_x=0.2 if i % 2 else -0.2,
+                                       jump=tick == 30, attack="special" if tick == 70 else None)
+                  for i, pid in enumerate([0, 2, 4, 6])}
+        a.step(inputs)
+        b.step(inputs)
+    assert a.snapshot() == b.snapshot()
+    assert MatchView.from_dict(json.loads(json.dumps(a.snapshot().to_dict()))) == a.snapshot()
+
+
+def test_headless_world_does_not_import_camera_or_ui():
+    import subprocess
+    import sys
+    check = """
+import sys
+from game.engine import GameWorld
+GameWorld().step({})
+assert not any(name.split('.')[0] in {'ui', 'cv2', 'mediapipe', 'vision'} for name in sys.modules)
+import pygame
+assert not pygame.display.get_init()
+"""
+    subprocess.run([sys.executable, "-c", check], check=True, capture_output=True)
+
+
+def test_all_three_prototype_moves_work_through_world_inputs():
+    from game.engine import GameWorld
+    for attack in ("jab", "smash", "special"):
+        world = GameWorld()
+        a, b = world.fighters
+        a.x, b.x = 600, 660
+        a.y = b.y = world.stage.main.top
+        a.on_ground = b.on_ground = True
+        world.step({0: ControllerState(attack=attack)})
+        hits = []
+        for _ in range(60):
+            world.step({})
+            hits.extend(e for e in world.events if e["kind"] == "hit")
+        assert b.damage == ATTACKS[attack].damage
+        assert len(hits) == 1 and hits[0]["attack"] == attack

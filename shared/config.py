@@ -18,3 +18,10 @@ CAMERA_HEIGHT = 480
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
 GAME_FPS = 60
+
+# Simulation/world size is shared by all clients, regardless of window size.
+SIMULATION_HZ = 60
+SNAPSHOT_HZ = 30
+INPUT_HZ = 30
+SERVER_HOST = "127.0.0.1"
+SERVER_PORT = 8765

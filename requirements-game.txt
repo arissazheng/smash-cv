@@ -1,0 +1,2 @@
+# Server and shape-rendered clients need no camera packages or model downloads.
+pygame>=2.5

@@ -4,6 +4,8 @@
     python main.py calibrate --name arissa    # sit neutral for 3 s, saves calibration/arissa.json
     python main.py play --calibration arissa  # you (camera) vs CPU
     python main.py play --replay recordings/jab/arissa_20261017_120000.jsonl   # recording vs CPU
+    python main.py server                     # headless multiplayer server
+    python main.py client --name Alice        # Pygame keyboard test client
 """
 
 import argparse
@@ -75,7 +77,6 @@ def calibrate(args):
 
 
 def play(args):
-    from controllers.camera_controller import CameraController
     from controllers.replay_controller import ReplayController
     from game.cpu import CpuController
     from game.engine import Game
@@ -86,6 +87,7 @@ def play(args):
     if args.replay:
         p1 = ReplayController(Path(args.replay), calibration, player_id=0)
     else:
+        from controllers.camera_controller import CameraController
         from vision.camera import CameraSource
         camera = CameraSource().start()
         p1 = CameraController(camera, calibration, player_id=0)
@@ -99,6 +101,25 @@ def play(args):
     finally:
         if camera is not None:
             camera.stop()
+
+
+def server(args):
+    import asyncio
+    from network.server import serve
+    asyncio.run(serve(args))
+
+
+def client(args):
+    import asyncio
+    from client.runtime import run_client
+    asyncio.run(run_client(args))
+
+
+def positive_int(value):
+    result = int(value)
+    if result < 1:
+        raise argparse.ArgumentTypeError("must be positive")
+    return result
 
 
 def main():
@@ -116,11 +137,37 @@ def main():
     p = sub.add_parser("play", help="play a match")
     p.add_argument("--calibration", default="default")
     p.add_argument("--replay", help="drive player 1 from a recording instead of the camera")
-    p.add_argument("--stocks", type=int, default=2)
+    p.add_argument("--stocks", type=positive_int, default=2)
     p.set_defaults(func=play)
 
+    p = sub.add_parser("server", help="host a headless LAN match")
+    p.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to accept LAN clients")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--players", type=int, choices=(2, 3, 4), default=2)
+    p.add_argument("--stocks", type=positive_int, default=2)
+    p.set_defaults(func=server)
+
+    p = sub.add_parser("client", help="join a server with a shape-rendered test client")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--name", default="Player")
+    p.add_argument("--input", choices=("keyboard", "camera", "replay", "demo", "idle"), default="keyboard")
+    p.add_argument("--calibration", default="default")
+    p.add_argument("--replay", help="landmark recording for --input replay")
+    p.add_argument("--manual-ready", action="store_true", help="press Enter instead of readying automatically")
+    p.add_argument("--headless", action="store_true", help="run without a window (demo/idle/camera/replay)")
+    p.add_argument("--duration", type=float, help="exit after this many seconds (useful for smoke tests)")
+    p.set_defaults(func=client)
+
     args = parser.parse_args()
-    args.func(args)
+    if getattr(args, "duration", None) is not None and args.duration <= 0:
+        parser.error("--duration must be positive")
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        pass
+    except (ConnectionError, OSError, ValueError) as exc:
+        parser.exit(1, f"{exc}\n")
 
 
 if __name__ == "__main__":

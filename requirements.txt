@@ -1,5 +1,5 @@
 mediapipe>=0.10.14
 opencv-python>=4.9
-pygame>=2.5
+-r requirements-game.txt
 numpy>=1.26
 pytest>=8.0
