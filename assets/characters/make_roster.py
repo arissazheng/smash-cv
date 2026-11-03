@@ -14,7 +14,7 @@ import cv2
 from pixel_sprite import preview
 
 HERE = Path(__file__).resolve().parent
-ROSTER = {"efros": "Efros", "ng": "Ng", "lyons": "Lyons", "oski": "Oski"}
+ROSTER = {"efros": "Efros", "ng": "Ng", "liu": "Liu", "lyons": "Lyons", "oski": "Oski"}
 
 
 def main():
