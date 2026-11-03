@@ -7,7 +7,8 @@ client's identity or the game state it claims; the server assigns player IDs
 and decides every input by running the gesture recognizer on the landmarks
 the browser sends. Server -> browser messages are built by shared/protocol.py.
 
-    hello       {"version", "name", "character"}   first message
+    hello       {"version", "name", "character", "mode", "room"}   first message;
+                mode "cpu" or "friends"; room is a code from a shared link, or null to create one
     character   {"character"}                       change fighter, in the lobby
     stage       {"stage"}                           pick the map, in the lobby (host only)
     ready       {"ready": bool}                     in the lobby
@@ -22,12 +23,13 @@ from __future__ import annotations
 import json
 import math
 
-VERSION = 3
+VERSION = 4
 MAX_MESSAGE_BYTES = 16384
 CHARACTERS = ("efros", "ng", "liu", "lyons", "oski")  # folders in assets/characters/
 STAGES = ("memorial_glade", "gateway", "sather_gate", "soda_hall")  # STAGES in game/stage.py
 HAND_SIDES = ("Left", "Right", "Unknown")
 POSE_POINTS, HAND_POINTS, MAX_HANDS = 33, 21, 2
+MODES = ("cpu", "friends")
 
 
 class ProtocolError(ValueError):
@@ -101,7 +103,7 @@ def _frame(frame):
 def validate_client(message: dict) -> dict:
     kind = message["type"]
     if kind == "hello":
-        _keys(message, ("type", "version", "name", "character"))
+        _keys(message, ("type", "version", "name", "character", "mode", "room"))
         if type(message["version"]) is not int or message["version"] != VERSION:
             raise ProtocolError(f"protocol version {VERSION} required; refresh the page")
         name = message["name"]
@@ -109,6 +111,14 @@ def validate_client(message: dict) -> dict:
             raise ProtocolError("name must contain 1–24 printable characters")
         if message["character"] not in CHARACTERS:
             raise ProtocolError(f"character must be one of {', '.join(CHARACTERS)}")
+        if message["mode"] not in MODES:
+            raise ProtocolError("mode must be cpu or friends")
+        room = message["room"]
+        if room is not None and (not isinstance(room, str) or len(room) != 4 or not room.isalpha()
+                                 or not room.isupper() or not room.isascii()):
+            raise ProtocolError("room must be a 4-letter code")
+        if room is not None and message["mode"] != "friends":
+            raise ProtocolError("only friends rooms can be joined by code")
     elif kind == "character":
         _keys(message, ("type", "character"))
         if message["character"] not in CHARACTERS:

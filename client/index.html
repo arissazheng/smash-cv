@@ -36,6 +36,12 @@
     .error { color: #ff9b9b; min-height: 1.4em; }
     [hidden] { display: none !important; }
 
+    .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .mode { display: grid; gap: 6px; text-align: left; padding: 22px 20px; border: 2px solid var(--line);
+      border-radius: 10px; background: #22182a; color: var(--text); cursor: pointer; }
+    .mode strong { font: bold 22px "Courier New", monospace; color: var(--gold); }
+    .mode span { color: var(--muted); font-weight: 400; }
+    .mode:hover { border-color: var(--gold); }
     .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
     .pick { display: grid; justify-items: center; gap: 4px; padding: 10px 6px; border: 2px solid var(--line);
       border-radius: 8px; background: #22182a; color: var(--text); cursor: pointer; text-align: center; }
@@ -78,11 +84,26 @@
   <div class="wrap">
     <header class="row" style="justify-content: space-between">
       <h1>SMASH CV</h1>
-      <span class="muted" id="status">Pick a fighter to join</span>
+      <span class="muted" id="status">Choose how to play</span>
     </header>
 
+    <!-- 0. How do you want to play? -->
+    <section class="panel" id="mode-view">
+      <h2>How do you want to play?</h2>
+      <div class="modes">
+        <button type="button" class="mode" id="mode-cpu"><strong>Play vs CPU</strong>
+          <span>Just you and your camera against a computer opponent. Starts as soon as you're ready.</span></button>
+        <button type="button" class="mode" id="mode-friends"><strong>Play with friends</strong>
+          <span>Get a link to share. Up to 4 players, each on their own laptop.</span></button>
+      </div>
+    </section>
+
     <!-- 1. Join -->
-    <section class="panel" id="join-view">
+    <section class="panel" id="join-view" hidden>
+      <div class="row" style="justify-content: space-between">
+        <h2 id="join-title">Join</h2>
+        <button type="button" class="secondary" id="back">Change mode</button>
+      </div>
       <h2>Your name</h2>
       <input type="text" id="name" maxlength="24" placeholder="e.g. Arissa" autocomplete="nickname">
       <h2>Choose your fighter</h2>
@@ -98,8 +119,8 @@
     <section class="lobby" id="lobby-view" hidden>
       <div class="panel">
         <h2>Room <span id="room"></span></h2>
-        <div>
-          <div class="muted">Share this link with your opponents:</div>
+        <div id="share">
+          <div class="muted">Share this link with your friends:</div>
           <div class="row"><span class="link" id="link"></span><button class="secondary" id="copy">Copy link</button></div>
         </div>
         <ul class="players" id="players"></ul>
@@ -145,7 +166,9 @@
     const $ = (id) => document.getElementById(id);
     const SEND_INTERVAL = 1000 / 30; // landmarks at most 30 times a second
 
-    const state = { character: null, me: null, phase: "join", calibrated: false, latest: null, readyNow: false };
+    const invited = new URLSearchParams(location.search).get("room")?.toUpperCase() ?? null;
+    const state = { mode: invited ? "friends" : null, room: invited, character: null, me: null, phase: "join",
+                    calibrated: false, latest: null, readyNow: false };
     let connection, tracker, renderer;
     const smoother = new LandmarkSmoother();
 
@@ -163,6 +186,17 @@
       };
       $("roster").append(b);
     }
+    function chooseMode(mode) {
+      state.mode = mode;
+      $("join").textContent = state.room ? `Join room ${state.room}` : mode === "cpu" ? "Start vs CPU" : "Create room";
+      $("join-title").textContent = state.room ? `You're invited to room ${state.room}`
+        : mode === "cpu" ? "Playing vs CPU" : "Playing with friends";
+      $("back").hidden = !!state.room;
+      show("join");
+    }
+    $("mode-cpu").onclick = () => chooseMode("cpu");
+    $("mode-friends").onclick = () => chooseMode("friends");
+    $("back").onclick = () => show("mode");
     try { $("name").value = localStorage.getItem("smashcv-name") ?? ""; } catch {}
     const updateJoin = () => { $("join").disabled = !($("name").value.trim() && state.character); };
     $("name").oninput = updateJoin;
@@ -184,7 +218,7 @@
         updateJoin();
         return;
       }
-      connection.hello(name, state.character);
+      connection.hello(name, state.character, state.mode, state.room);
       startCamera();
     };
 
@@ -276,15 +310,16 @@
     $("rematch").onclick = () => { connection.rematch(); $("rematch").disabled = true; $("rematch").textContent = "Waiting for others…"; };
 
     function renderLobby(lobby) {
-      $("room").textContent = lobby.room;
+      $("room").textContent = lobby.mode === "cpu" ? "vs CPU" : lobby.room;
       $("link").textContent = lobby.link;
+      $("share").hidden = lobby.mode === "cpu";
       $("players").replaceChildren(...lobby.players.map((p) => {
         const li = document.createElement("li");
         const you = p.id === state.me ? " (you)" : "";
-        const status = lobby.phase === "finished" ? (p.rematch ? "wants a rematch" : "") : (p.ready ? "ready" : "not ready");
+        const status = p.cpu ? "computer" : lobby.phase === "finished" ? (p.rematch ? "wants a rematch" : "") : (p.ready ? "ready" : "not ready");
         li.innerHTML = `<img alt=""><span></span><span class="status"></span>`;
         li.querySelector("img").src = portrait(p.character);
-        li.querySelector("span").textContent = `P${p.id + 1} · ${p.name}${you}`;
+        li.querySelector("span").textContent = p.cpu ? `CPU · ${p.character}` : `P${p.id + 1} · ${p.name}${you}`;
         li.querySelector(".status").textContent = status;
         li.querySelector(".status").style.color = p.ready || p.rematch ? "var(--green)" : "var(--muted)";
         return li;
@@ -299,15 +334,18 @@
         : host ? `${host.name} (the host) picks the stage.` : "";
       const me = lobby.players.find((p) => p.id === state.me);
       for (const b of $("fighters").children) b.setAttribute("aria-pressed", String(b.dataset.character === me?.character));
-      const waiting = lobby.capacity - lobby.players.length;
+      const humans = lobby.players.filter((p) => !p.cpu).length;
       const mine = lobby.players.find((p) => p.id === state.me);
       state.readyNow = !!mine?.ready;
       $("ready").textContent = state.readyNow ? "Not ready" : "Ready";
-      $("status").textContent = waiting > 0 ? `Waiting for ${waiting} more player${waiting > 1 ? "s" : ""}` : "Everyone's here: ready up";
+      $("status").textContent = lobby.mode === "cpu" ? "Calibrate, then press Ready to fight the CPU"
+        : humans < 2 ? "Share the link: waiting for a friend to join"
+        : `${humans} player${humans > 1 ? "s" : ""} here (up to ${lobby.capacity}): ready up`;
     }
 
     // ---- server messages --------------------------------------------------
     function show(view) {
+      $("mode-view").hidden = view !== "mode";
       $("join-view").hidden = view !== "join";
       $("lobby-view").hidden = view !== "lobby";
       $("match-view").hidden = view !== "match";
@@ -362,7 +400,8 @@
       })();
     }
 
-    show("join");
+    if (invited) chooseMode("friends");
+    else show("mode");
   </script>
 </body>
 </html>

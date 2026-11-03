@@ -61,12 +61,13 @@
  * @typedef {object} Lobby
  * @property {"lobby"} type
  * @property {string} room           room code, e.g. "ABCD"
- * @property {string} link           shareable link to the room
+ * @property {string} link           shareable link to the room (…/?room=ABCD)
  * @property {number} host           player id of the room's creator
  * @property {string} stage
  * @property {"lobby" | "countdown" | "playing" | "finished"} phase
- * @property {number} capacity       players needed to start
- * @property {{id: number, name: string, character: string, ready: boolean, connected: boolean, rematch: boolean}[]} players
+ * @property {number} capacity       humans the room holds (1 vs CPU, up to 4 with friends)
+ * @property {"cpu" | "friends"} mode
+ * @property {{id: number, name: string, character: string, ready: boolean, connected: boolean, rematch: boolean, cpu: boolean}[]} players
  */
 
 /**
@@ -82,7 +83,7 @@
 // Exact field lists, checked against shared/protocol_examples/ by the tests.
 export const FIGHTER_FIELDS = ["id", "character", "x", "y", "w", "h", "facing", "state", "damage", "stocks", "shield", "life_id", "invulnerable", "hitbox"];
 export const STAGE_FIELDS = ["name", "width", "height", "main", "platforms", "background"];
-export const LOBBY_PLAYER_FIELDS = ["id", "name", "character", "ready", "connected", "rematch"];
+export const LOBBY_PLAYER_FIELDS = ["id", "name", "character", "ready", "connected", "rematch", "cpu"];
 export const EVENT_FIELDS = {
   hit: ["attacker", "target", "attack", "damage", "shielded", "x", "y"], // x, y = where it landed
   ko: ["player", "stocks_left", "x", "y"],                               // x, y = where they left (off-screen)

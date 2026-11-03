@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from websockets.asyncio.client import connect
 
@@ -23,8 +24,8 @@ from shared.landmarks import LandmarkFrame
 
 
 def ws_url(link: str) -> str:
-    """http://host:port/ -> ws://host:port/ws (https -> wss)."""
-    base = link.rstrip("/")
+    """http://host:port/?room=ABCD -> ws://host:port/ws (https -> wss)."""
+    base = link.split("?", 1)[0].rstrip("/")
     if base.startswith("https://"):
         base = "wss://" + base[len("https://"):]
     elif base.startswith("http://"):
@@ -33,8 +34,11 @@ def ws_url(link: str) -> str:
 
 
 class Bot:
-    def __init__(self, link: str, name: str = "Bot", character: str = "oski"):
+    def __init__(self, link: str, name: str = "Bot", character: str = "oski", mode: str = "friends"):
+        """A link with ?room=ABCD joins that room; without one the bot creates a room in `mode`."""
         self.url = ws_url(link)
+        self.room = parse_qs(urlparse(link).query).get("room", [None])[0]
+        self.mode = mode
         self.name, self.character = name, character
         self.player_id = None
         self.messages: list[dict] = []
@@ -46,9 +50,11 @@ class Bot:
         self.ws = await connect(self.url, max_size=None)
         self._reader = asyncio.create_task(self._read())
         if hello:
-            await self.send({"type": "hello", "version": VERSION, "name": self.name, "character": self.character})
+            await self.send({"type": "hello", "version": VERSION, "name": self.name,
+                             "character": self.character, "mode": self.mode, "room": self.room})
             welcome = await self.wait_for("welcome")
             self.player_id = welcome["player_id"]
+            self.room, self.link = welcome["room"], welcome["link"]
         return self
 
     async def _read(self):
@@ -104,7 +110,7 @@ class Bot:
 
 
 async def replay(link: str, path: Path, name: str = "Replay", character: str = "oski"):
-    """Join, ready up, and play a recording on loop until the server closes."""
+    """Join the room in `link` (?room=ABCD), ready up, and play a recording on loop."""
     _, frames = read_recording(path)
     if not frames:
         raise SystemExit(f"{path} has no frames")

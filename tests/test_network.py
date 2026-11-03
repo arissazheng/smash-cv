@@ -33,7 +33,9 @@ async def started_server(**kwargs):
 
 
 async def joined(link, n=2, characters=("efros", "oski", "ng", "liu")):
-    bots = [await Bot(link, f"P{i + 1}", characters[i]).connect() for i in range(n)]
+    """The first bot creates a friends room; the rest join through its shareable link."""
+    first = await Bot(link, "P1", characters[0]).connect()
+    bots = [first] + [await Bot(first.link, f"P{i + 1}", characters[i]).connect() for i in range(1, n)]
     for bot in bots:
         await bot.calibrate(CALIB.center_x, CALIB.shoulder_y, CALIB.nose_y, CALIB.shoulder_width)
     return bots
@@ -59,7 +61,8 @@ def test_join_play_lean_jump_and_snapshot_format():
         a, b = await joined(link)
         assert (a.player_id, b.player_id) == (0, 1)
         welcome = await a.wait_for("welcome")
-        assert welcome["room"] == server.room and welcome["link"] == link
+        assert welcome["room"] in server.rooms and welcome["link"] == f"{link}?room={welcome['room']}"
+        assert welcome["mode"] == "friends" and b.room == a.room
 
         await a.ready()
         await b.ready()
@@ -87,7 +90,7 @@ def test_join_play_lean_jump_and_snapshot_format():
 
 def test_disconnect_ends_match_then_rematch_returns_to_lobby():
     async def scenario():
-        server, link = await started_server(players=3)
+        server, link = await started_server()
         a, b, c = await joined(link, n=3)
         for bot in (a, b, c):
             await bot.ready()
@@ -104,8 +107,9 @@ def test_disconnect_ends_match_then_rematch_returns_to_lobby():
         assert over["winner"] == 0
         await a.wait_for("lobby", phase="finished")
 
-        d = await Bot(link).connect(hello=False)                 # can't join a finished match
-        await d.send({"type": "hello", "version": VERSION, "name": "Late", "character": "ng"})
+        d = await Bot(a.link).connect(hello=False)               # can't join a finished match
+        await d.send({"type": "hello", "version": VERSION, "name": "Late", "character": "ng",
+                      "mode": "friends", "room": a.room})
         assert (await d.wait_for("error"))["message"].startswith("match in progress")
         mark = a.mark()
         await a.send({"type": "rematch"})
@@ -122,7 +126,8 @@ def test_rematch_needs_everyone():
         await a.ready()
         await b.ready()
         await a.wait_for("lobby", phase="playing")
-        server.world.fighters[1].x = -5000                       # P2 falls off: game over
+        room = server.rooms[a.room]
+        room.world.fighters[1].x = -5000                         # P2 falls off: game over
         await a.wait_for("event", kind="game_over")
         await a.send({"type": "rematch"})
         lobby = await b.wait_for("lobby", where=lambda m: any(p["rematch"] for p in m["players"]))
@@ -130,18 +135,26 @@ def test_rematch_needs_everyone():
         mark = a.mark()
         await b.send({"type": "rematch"})
         await a.wait_for("lobby", phase="lobby", since=mark)
-        assert server.world is None
+        assert room.world is None
         for bot in (a, b):
             await bot.close()
         await server.close()
     run(scenario)
 
 
+def _hello(**changes):
+    return {"type": "hello", "version": VERSION, "name": "A", "character": "oski", "mode": "friends",
+            "room": None, **changes}
+
+
 @pytest.mark.parametrize("first_message, error", [
     ({"type": "ready", "ready": True}, "hello must be the first"),
-    ({"type": "hello", "version": VERSION, "name": "A", "character": "mario"}, "character must be"),
-    ({"type": "hello", "version": 1, "name": "A", "character": "oski"}, "protocol version"),
-    ({"type": "hello", "version": VERSION, "name": "", "character": "oski"}, "name must"),
+    (_hello(character="mario"), "character must be"),
+    (_hello(version=1), "protocol version"),
+    (_hello(name=""), "name must"),
+    (_hello(mode="solo"), "mode must"),
+    (_hello(room="ZZZZ"), "doesn't exist"),
+    (_hello(mode="cpu", room="ABCD"), "only friends rooms"),
 ])
 def test_bad_first_message_gets_an_error_and_is_closed(first_message, error):
     async def scenario():
@@ -150,12 +163,13 @@ def test_bad_first_message_gets_an_error_and_is_closed(first_message, error):
         await bot.send(first_message)
         assert error in (await bot.wait_for("error"))["message"]
         await bot._reader          # the server closed the connection
-        assert server.sessions == {}
+        await asyncio.sleep(0.05)
+        assert all(not room.sessions for room in server.rooms.values())
         await server.close()
     run(scenario)
 
 
-def test_clients_cannot_send_inputs_or_bad_frames_and_full_lobby_is_refused():
+def test_clients_cannot_send_inputs_or_bad_frames():
     async def scenario():
         server, link = await started_server()
         a, b = await joined(link)
@@ -166,18 +180,55 @@ def test_clients_cannot_send_inputs_or_bad_frames_and_full_lobby_is_refused():
         await b.send({"type": "landmarks", "frame": frame})
         assert "landmarks" in (await b.wait_for("error"))["message"]
         await asyncio.gather(a._reader, b._reader)                # the server closed both
-        while server.sessions:                                     # and finished removing them
+        while server.rooms:                                        # and dropped the empty room
             await asyncio.sleep(0.01)
-        c = await Bot(link).connect(hello=False)
-        await c.send({"type": "hello", "version": VERSION, "name": "Late", "character": "ng"})
-        await c.wait_for("welcome")                                # both earlier players were removed
-        d = await Bot(link).connect(hello=False)
-        await d.send({"type": "hello", "version": VERSION, "name": "Later", "character": "ng"})
-        await d.wait_for("welcome")
-        e = await Bot(link).connect(hello=False)
-        await e.send({"type": "hello", "version": VERSION, "name": "Full", "character": "ng"})
-        assert (await e.wait_for("error"))["message"] == "lobby is full"
-        for bot in (a, b, c, d, e):
+        await server.close()
+    run(scenario)
+
+
+def test_friends_room_holds_four_and_rooms_are_independent():
+    async def scenario():
+        server, link = await started_server()
+        bots = await joined(link, n=4)
+        extra = await Bot(bots[0].link).connect(hello=False)
+        await extra.send(_hello(room=bots[0].room))
+        assert (await extra.wait_for("error"))["message"] == "room is full"
+        other = await Bot(link, "Solo", "ng").connect()            # no code: a separate new room
+        assert other.room != bots[0].room and other.player_id == 0
+        for bot in bots[:2]:
+            await bot.ready()
+        await asyncio.sleep(0.1)
+        assert server.rooms[bots[0].room].world is None           # everyone in the room must be ready
+        for bot in bots[2:]:
+            await bot.ready()
+        start = await bots[0].wait_for("match_start")
+        assert len(start["players"]) == 4
+        assert not other.of_type("match_start")                    # the other room is untouched
+        for bot in [*bots, extra, other]:
+            await bot.close()
+        await server.close()
+    run(scenario)
+
+
+def test_vs_cpu_room_starts_with_one_player_and_the_cpu_plays():
+    async def scenario():
+        server, link = await started_server()
+        me = await Bot(link, "Arissa", "oski", mode="cpu").connect()
+        lobby = await me.wait_for("lobby")
+        assert lobby["mode"] == "cpu" and lobby["capacity"] == 1
+        cpu = next(p for p in lobby["players"] if p["cpu"])
+        assert cpu["name"] == "CPU" and cpu["character"] != "oski"
+        intruder = await Bot(link).connect(hello=False)            # a CPU room can't be joined by code
+        await intruder.send(_hello(room=me.room))
+        assert "doesn't exist" in (await intruder.wait_for("error"))["message"]
+
+        await me.ready()
+        start = await me.wait_for("match_start")
+        assert [p["name"] for p in start["players"]] == ["Arissa", "CPU"]
+        first = await me.wait_for("snapshot", where=lambda m: m["tick"] > 0)
+        await me.wait_for("snapshot", timeout=5,
+                          where=lambda m: abs(fighter(m, 1)["x"] - fighter(first, 1)["x"]) > 30)  # CPU walks over
+        for bot in (me, intruder):
             await bot.close()
         await server.close()
     run(scenario)
@@ -277,7 +328,7 @@ def test_host_picks_the_stage_and_players_can_change_fighter():
         assert fighter(snap, 1)["character"] == "liu"
         await b.send({"type": "stage", "stage": "gateway"})        # can't change mid-match
         await asyncio.sleep(0.1)
-        assert server.stage_id == "sather_gate"
+        assert server.rooms[a.room].stage_id == "sather_gate"
         for bot in (a, b):
             await bot.close()
         await server.close()

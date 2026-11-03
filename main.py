@@ -5,7 +5,7 @@
     python main.py play --calibration arissa  # you (camera) vs CPU
     python main.py play --replay recordings/jab/arissa_20261017_120000.jsonl   # recording vs CPU
     python main.py server                     # online match: players open the printed link in a browser
-    python main.py bot --replay recordings/jump/arissa_20261103.jsonl   # recorded player joins the server
+    python main.py bot --link 'http://127.0.0.1:8765/?room=ABCD' --replay recordings/jump/arissa.jsonl   # recorded player joins a room
 """
 
 import argparse
@@ -143,13 +143,12 @@ def main():
     p = sub.add_parser("server", help="host an online match played in browsers")
     p.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to accept other computers")
     p.add_argument("--port", type=int, default=8765)
-    p.add_argument("--players", type=int, choices=(2, 3, 4), default=2)
     p.add_argument("--stocks", type=positive_int, default=2)
     p.add_argument("--public-url", help="the https link players use, e.g. from a tunnel")
     p.set_defaults(func=server)
 
     p = sub.add_parser("bot", help="join a server as a player driven by a landmark recording")
-    p.add_argument("--link", default="http://127.0.0.1:8765/")
+    p.add_argument("--link", required=True, help="a room link from the play page, e.g. http://127.0.0.1:8765/?room=ABCD")
     p.add_argument("--replay", required=True, help="landmark recording (.jsonl) to play on loop")
     p.add_argument("--name", default="Replay")
     p.add_argument("--character", default="oski")

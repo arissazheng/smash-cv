@@ -2,5 +2,6 @@
   "type": "welcome",
   "player_id": 0,
   "room": "ABCD",
-  "link": "https://example.com/"
+  "link": "https://example.com/?room=ABCD",
+  "mode": "friends"
 }

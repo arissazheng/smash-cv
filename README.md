@@ -11,13 +11,20 @@ The server and its tests need no camera packages:
 
 ```bash
 pip install -r requirements-game.txt
-python main.py server                     # --players 2|3|4, --stocks N
+python main.py server                     # --stocks N
 ```
 
-Open the printed link (`http://127.0.0.1:8765/`) in a browser, pick a fighter,
-allow the camera, calibrate, and press Ready. In the lobby you can switch
-fighters, and the host (first to join) picks the stage: Memorial Glade,
-Gateway, Sather Gate or Soda Hall. The match starts when every slot is ready.
+Open the printed link (`http://127.0.0.1:8765/`) in a browser and choose:
+
+- **Play vs CPU:** a private room against a computer opponent. Pick a fighter,
+  allow the camera, calibrate, press Ready.
+- **Play with friends:** creates a room and a shareable link
+  (`…/?room=ABCD`). Friends who open it land in your lobby. Up to 4 players;
+  the match starts once at least two are in and everyone is ready.
+
+In the lobby you can switch fighters, and the host (first to join) picks the
+stage: Memorial Glade, Gateway, Sather Gate or Soda Hall. One server runs many
+rooms at once.
 
 **Playing with friends on other computers.** Browsers only allow the camera on
 `https://` pages (or `localhost`), so share an https link to your server, for
@@ -28,11 +35,14 @@ cloudflared tunnel --url http://localhost:8765     # or: ngrok http 8765
 python main.py server --public-url https://<the-link-it-printed>/
 ```
 
-**Testing alone.** A bot joins like a browser and plays a recorded clip on
-loop through the same gesture recognizer real players use:
+Room links then use the https address.
+
+**Testing alone.** Play vs CPU, or create a friends room and let a bot join
+it. The bot plays a recorded clip on loop through the same gesture recognizer
+real players use:
 
 ```bash
-python main.py bot --replay recordings/<label>/<file>.jsonl --character oski
+python main.py bot --link 'http://127.0.0.1:8765/?room=ABCD' --replay recordings/<label>/<file>.jsonl --character oski
 ```
 
 ## Setup for camera and vision work
@@ -68,8 +78,9 @@ Close a pygame window to quit. In the overlay and recorder windows, press `q`.
 
 ## Architecture
 
-One server hosts one match for 2–4 players. Each player opens the server's link
-in their own browser and plays with their own laptop camera.
+One server hosts many rooms. Each room is one lobby and match: one player vs
+the CPU, or 2–4 friends who joined through the room's link. Each player plays
+in their own browser with their own laptop camera.
 
 ```mermaid
 flowchart LR
@@ -126,15 +137,15 @@ JSON over one WebSocket per player.
 
 | Direction | Message | Contents | When |
 | --- | --- | --- | --- |
-| browser → server | `hello` | protocol version, name, character | First message |
+| browser → server | `hello` | protocol version, name, character, mode (`cpu`/`friends`), room code from a link or null to create a room | First message |
 | browser → server | `calibrate` | center_x, shoulder_y, nose_y, shoulder_width (computed in the browser) | Any time before or during the match |
 | browser → server | `character` | fighter id | In the lobby, to switch fighter |
 | browser → server | `stage` | stage id | In the lobby; only the host's choice counts |
 | browser → server | `ready` | true or false | In the lobby |
 | browser → server | `landmarks` | one `LandmarkFrame` | Every camera frame while playing |
 | browser → server | `rematch`, `leave` | nothing | After game over; when leaving |
-| server → browser | `welcome` | your player id, room code, shareable link | After `hello` |
-| server → browser | `lobby` | room, link, host, stage id, phase (`lobby`/`countdown`/`playing`/`finished`), capacity, and each player's name, character, ready, connected and rematch | Whenever any of that changes |
+| server → browser | `welcome` | your player id, room code, shareable link, mode | After `hello` |
+| server → browser | `lobby` | room, link, host, stage id, phase (`lobby`/`countdown`/`playing`/`finished`), capacity, mode, and each player's name, character, ready, connected, rematch and whether it's the CPU | Whenever any of that changes |
 | server → browser | `match_start` | stage layout and background, players and characters, countdown seconds | When everyone is ready |
 | server → browser | `snapshot` | tick, match time, and for each fighter: id, character, x, y, body size, facing, animation state, damage %, stocks, shield, life_id, invulnerable, active hitbox | About 30 times a second |
 | server → browser | `event` | tick and match time, plus `hit` (attacker, target, attack, damage, shielded, where it landed), `ko` (player, stocks left, where they left), `disconnect` (player) or `game_over` (winner, or null for a draw) | When it happens |
@@ -178,7 +189,7 @@ standing in for browsers.
 | `client/vision/` | Person 1 | Browser (JavaScript) | Camera, MediaPipe for the web, smoothing, overlay, calibration |
 | `vision/` | Person 1 | Local tools (Python) | Python version of the same, used by `main.py` and the recorder |
 | `gestures/` | Person 2 | Server (Python) | Detectors, recognizer (edges and cooldowns), clip recorder |
-| `network/`, `client/net.js` | Person 3 | Server + browser | WebSocket server, lobby, rematch, disconnects, message validation, test bot |
+| `network/`, `client/net.js` | Person 3 | Server + browser | WebSocket server, rooms (vs CPU and friends), lobby, rematch, disconnects, message validation, test bot |
 | `game/` | Person 3 | Server (Python) | `GameWorld`: physics, fighters, combat, stage, events, CPU |
 | `client/render/`, `client/index.html`, `client/characters.js` | Person 4 | Browser (JavaScript) | Canvas renderer, HUD, effects, join/lobby/match screens |
 | `assets/`, `ui/` | Person 4 | Offline tools + local pygame harness | Pixel art scripts, sprites, stages, OpenCV sprite slicing |
@@ -188,7 +199,7 @@ Find your work with `grep -rn "TODO(Person 2)" .` and so on.
 
 ## What works today
 
-- **Online play:** join from a link, pick a fighter, calibrate, ready up, countdown, match, game over, rematch. Disconnects remove that fighter; the last one standing wins.
+- **Online play:** play vs CPU, or create a room and share its link with up to 3 friends. Pick a fighter, calibrate, ready up, countdown, match, game over, rematch. Disconnects remove that fighter; the last one standing wins.
 - **Browser camera tracking** with MediaPipe, sending landmarks to the server.
 - **Detectors:** lean to move, duck to crouch, both hands up to jump, fast wrist to jab, both fists to smash, special, up special, shield, grab, taunt, pause (ignored online), and a fingertip pointer.
 - **Game:** running, double jump, platform drop-through, all five attacks, damage %, knockback that grows with damage, stocks, respawn invulnerability, simultaneous hits that trade.

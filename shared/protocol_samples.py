@@ -47,10 +47,10 @@ def _game_with_jab_landing():
 def build_examples() -> dict[str, dict]:
     examples = {}
 
-    examples["welcome"] = protocol.welcome(0, "ABCD", "https://example.com/")
+    examples["welcome"] = protocol.welcome(0, "ABCD", "https://example.com/?room=ABCD", "friends")
     examples["lobby"] = protocol.lobby(
         room="ABCD",
-        link="https://example.com/",
+        link="https://example.com/?room=ABCD",
         host=0,
         stage="gateway",
         phase="lobby",
@@ -59,8 +59,9 @@ def build_examples() -> dict[str, dict]:
             protocol.LobbyPlayer(0, "Arissa", "efros", ready=True),
             protocol.LobbyPlayer(1, "Sam", "oski"),
         ],
+        mode="friends",
     )
-    examples["error"] = protocol.error("lobby is full")
+    examples["error"] = protocol.error("room is full")
 
     game = _new_game()
     examples["match_start"] = protocol.match_start(game.stage, [

@@ -1,8 +1,12 @@
-"""Authoritative game server: one 2–4 player match at a time, played in browsers.
+"""Authoritative game server: many rooms, each one match, played in browsers.
 
 Owner: Person 3.
 
     python main.py server            # then open the printed link
+
+Players choose on the start page: "vs CPU" makes a private room with a CPU
+opponent; "with friends" makes a room with a shareable link (?room=ABCD) for
+up to 4 players. Opening that link joins the same room.
 
 Browsers load the play page from this same server and connect back over a
 WebSocket at /ws. Each browser runs MediaPipe locally and sends landmarks, never
@@ -27,10 +31,11 @@ from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request, Response
 
+from game.cpu import CpuController
 from game.engine import GameWorld
 from game.stage import DEFAULT_STAGE, STAGES
 from gestures.recognizer import GestureRecognizer
-from network.protocol import MAX_MESSAGE_BYTES, ProtocolError, decode, encode, validate_client
+from network.protocol import CHARACTERS, MAX_MESSAGE_BYTES, ProtocolError, decode, encode, validate_client
 from shared import config, protocol
 from shared.controller_state import ControllerState
 from shared.landmarks import LandmarkFrame
@@ -40,6 +45,9 @@ STALE_INPUT_SECONDS = 0.25   # no landmarks for this long: stand still
 DISCONNECT_SECONDS = 5.0     # no landmarks for this long mid-match: removed from the match
 MAX_PENDING_ACTIONS = 32
 MAX_MESSAGES_PER_SECOND = 120
+MAX_ROOMS = 100
+MAX_FRIENDS = 4              # players in a friends room
+CPU_ID = 1                   # in a CPU room the human is player 0
 WS_PATH = "/ws"
 
 # Files the server may hand to browsers: URL prefix -> folder in the repo.
@@ -142,23 +150,189 @@ class Session:
         return state  # pause is ignored online: one player can't freeze everyone's match
 
 
-class GameServer:
-    def __init__(self, host=config.SERVER_HOST, port=config.SERVER_PORT,
-                 players=2, stocks=2, countdown=3.0, public_url: str | None = None):
-        if not 2 <= players <= 4 or stocks < 1 or countdown < 0:
-            raise ValueError("expected 2–4 players, positive stocks, nonnegative countdown")
-        self.host, self.port = host, port
-        self.capacity, self.stocks, self.countdown = players, stocks, countdown
-        self.room = "".join(random.choices(string.ascii_uppercase, k=4))
-        self.public_url = public_url
+class Room:
+    """One lobby and its match. mode is "cpu" (one human vs the CPU) or "friends" (2–4 humans)."""
+
+    def __init__(self, server: "GameServer", code: str, mode: str):
+        self.server, self.code, self.mode = server, code, mode
+        self.capacity = 1 if mode == "cpu" else MAX_FRIENDS  # humans
         self.sessions: dict[int, Session] = {}
         self.stage_id = DEFAULT_STAGE  # the host picks in the lobby
         self.world: GameWorld | None = None
+        self.cpu: CpuController | None = None
+        self.starts_at = 0.0
+
+    @property
+    def link(self) -> str:
+        return f"{self.server.link}?room={self.code}"
+
+    @property
+    def phase(self) -> str:
+        return "lobby" if self.world is None else self.world.phase
+
+    @property
+    def host(self) -> int | None:
+        """The first player to join (lowest id still connected) picks the stage."""
+        return min(self.sessions, default=None)
+
+    def cpu_character(self) -> str:
+        """A different fighter from the human's."""
+        human = next(iter(self.sessions.values()), None)
+        return next(c for c in CHARACTERS if human is None or c != human.character)
+
+    # ---- joining and leaving ------------------------------------------------
+
+    def join(self, name: str, character: str, ws) -> Session:
+        if self.world is not None:
+            raise ProtocolError("match in progress; join after it ends")
+        free = [i for i in range(self.capacity) if i not in self.sessions]
+        if not free:
+            raise ProtocolError("room is full")
+        session = Session(free[0], name, character, ws)
+        self.sessions[session.player_id] = session
+        session.send(protocol.welcome(session.player_id, self.code, self.link, self.mode))
+        self.lobby()
+        return session
+
+    def leave(self, session: Session):
+        if self.sessions.get(session.player_id) is not session:
+            return
+        del self.sessions[session.player_id]
+        if self.world:
+            self.world.eliminate(session.player_id)
+            self.publish_events()
+            self.snapshot()
+        if not self.sessions:
+            self.world = None
+        elif self.world and self.world.phase == "finished" and all(s.rematch for s in self.sessions.values()):
+            self.reset()
+        self.lobby()
+
+    # ---- messages to everyone in the room ------------------------------------
+
+    def broadcast(self, message):
+        for session in list(self.sessions.values()):
+            session.send(message)
+
+    def lobby(self):
+        players = [protocol.LobbyPlayer(s.player_id, s.name, s.character, s.ready, not s.closed, s.rematch)
+                   for s in sorted(self.sessions.values(), key=lambda s: s.player_id)]
+        if self.mode == "cpu":
+            players.append(protocol.LobbyPlayer(CPU_ID, "CPU", self.cpu_character(), True, True, True, cpu=True))
+        self.broadcast(protocol.lobby(self.code, self.link, self.host, self.stage_id, self.phase,
+                                      self.capacity, players, self.mode))
+
+    def snapshot(self):
+        if self.world is not None:
+            self.broadcast(self.world.snapshot())
+
+    def publish_events(self):
+        if self.world and self.world.events:
+            for e in self.world.events:
+                self.broadcast(protocol.event(e, self.world.tick_number, self.world.time))
+            self.world.events = []
+
+    # ---- match lifecycle ------------------------------------------------------
+
+    def start_if_ready(self):
+        humans = len(self.sessions)
+        enough = humans == 1 if self.mode == "cpu" else humans >= 2
+        if self.world is not None or not enough or not all(s.ready for s in self.sessions.values()):
+            return
+        now = asyncio.get_running_loop().time()
+        players = [{"id": s.player_id, "name": s.name, "character": s.character}
+                   for s in sorted(self.sessions.values(), key=lambda s: s.player_id)]
+        if self.mode == "cpu":
+            players.append({"id": CPU_ID, "name": "CPU", "character": self.cpu_character()})
+        stage = STAGES[self.stage_id](len(players))
+        self.world = GameWorld([p["id"] for p in players], stage=stage, stocks=self.server.stocks,
+                               match_id=uuid4().hex)
+        by_id = {f.player_id: f for f in self.world.fighters}
+        for p in players:
+            by_id[p["id"]].character = p["character"]
+        self.cpu = CpuController(by_id[CPU_ID], by_id[0], CPU_ID) if self.mode == "cpu" else None
+        self.world.phase = "countdown"
+        self.starts_at = now + self.server.countdown
+        for session in self.sessions.values():
+            session.reset_inputs(now)
+        self.broadcast(protocol.match_start(self.world.stage, players, self.server.countdown))
+        self.lobby()
+        self.snapshot()
+
+    def reset(self):
+        self.world = None
+        self.cpu = None
+        for session in self.sessions.values():
+            session.ready = session.rematch = False
+            session.latest_snapshot = None
+        self.lobby()
+
+    def handle(self, session: Session, message: dict, now: float):
+        kind = message["type"]
+        if kind == "landmarks":
+            if self.world and self.world.phase == "playing":
+                session.accept_frame(message["frame"], now)
+        elif kind == "character" and self.world is None:
+            session.character = message["character"]
+            self.lobby()
+        elif kind == "stage" and self.world is None and session.player_id == self.host:
+            self.stage_id = message["stage"]
+            self.lobby()
+        elif kind == "calibrate":
+            session.set_calibration(message["calibration"])
+        elif kind == "ready" and self.world is None:
+            session.ready = message["ready"]
+            self.lobby()
+            self.start_if_ready()
+        elif kind == "rematch" and self.world and self.world.phase == "finished":
+            session.rematch = True
+            self.lobby()
+            if all(s.rematch for s in self.sessions.values()):
+                self.reset()
+        elif kind == "hello":
+            raise ProtocolError("already joined")
+
+    def tick(self, now: float, dt: float):
+        world = self.world
+        if world is None:
+            return
+        if world.phase == "countdown" and now >= self.starts_at:
+            world.phase = "playing"
+            for s in self.sessions.values():
+                s.last_input = now
+            self.lobby()
+        if world.phase != "playing":
+            return
+        for s in list(self.sessions.values()):
+            if now - s.last_input > DISCONNECT_SECONDS:
+                s.close()  # camera stopped sending; the handler removes them
+        lives = {f.player_id: f.life_id for f in world.fighters}
+        inputs = {s.player_id: s.consume(now) for s in self.sessions.values()}
+        if self.cpu is not None:
+            inputs[CPU_ID] = self.cpu.poll(dt)
+        world.step(inputs)
+        for f in world.fighters:
+            if f.life_id != lives[f.player_id] and f.player_id in self.sessions:
+                self.sessions[f.player_id].actions.clear()  # no attacks queued across a KO
+        finished = world.phase == "finished"
+        self.publish_events()
+        if finished:
+            self.snapshot()
+            self.lobby()  # phase "finished": browsers show rematch
+
+
+class GameServer:
+    def __init__(self, host=config.SERVER_HOST, port=config.SERVER_PORT,
+                 stocks=2, countdown=3.0, public_url: str | None = None):
+        if stocks < 1 or countdown < 0:
+            raise ValueError("expected positive stocks and a nonnegative countdown")
+        self.host, self.port = host, port
+        self.stocks, self.countdown = stocks, countdown
+        self.rooms: dict[str, Room] = {}
         self.tick_overruns = 0
         self._server = None
         self._ticker = None
         self._closing = False
-        self._starts_at = 0.0
         self._link = public_url
 
     @property
@@ -167,7 +341,7 @@ class GameServer:
 
     @property
     def link(self) -> str:
-        """The shareable link: --public-url, or the address the first browser used."""
+        """The server's base link: --public-url, or the address the first browser used."""
         if self._link:
             return self._link
         host, port = self.address
@@ -187,6 +361,14 @@ class GameServer:
         if self._server:
             self._server.close()
             await self._server.wait_closed()
+
+    def _new_room(self, mode: str) -> Room:
+        if len(self.rooms) >= MAX_ROOMS:
+            raise ProtocolError("the server is full; try again later")
+        while (code := "".join(random.choices(string.ascii_uppercase, k=4))) in self.rooms:
+            pass
+        room = self.rooms[code] = Room(self, code, mode)
+        return room
 
     # ---- web page ---------------------------------------------------------
 
@@ -211,80 +393,23 @@ class GameServer:
             kind = "text/javascript"
         return _response(200, "OK", file.read_bytes(), kind)
 
-    # ---- messages to everyone --------------------------------------------
-
-    def _broadcast(self, message):
-        for session in list(self.sessions.values()):
-            session.send(message)
-
-    def _phase(self) -> str:
-        return "lobby" if self.world is None else self.world.phase
-
-    def _lobby(self):
-        players = [protocol.LobbyPlayer(s.player_id, s.name, s.character, s.ready, not s.closed, s.rematch)
-                   for s in sorted(self.sessions.values(), key=lambda s: s.player_id)]
-        self._broadcast(protocol.lobby(self.room, self.link, self._host(), self.stage_id,
-                                       self._phase(), self.capacity, players))
-
-    def _host(self) -> int | None:
-        """The first player to join (lowest id still connected) picks the stage."""
-        return min(self.sessions, default=None)
-
-    def _snapshot(self):
-        if self.world is not None:
-            self._broadcast(self.world.snapshot())
-
-    def _publish_events(self):
-        if self.world and self.world.events:
-            for e in self.world.events:
-                self._broadcast(protocol.event(e, self.world.tick_number, self.world.time))
-            self.world.events = []
-
-    def _start_if_ready(self):
-        if (self.world is not None or len(self.sessions) != self.capacity
-                or not all(s.ready for s in self.sessions.values())):
-            return
-        now = asyncio.get_running_loop().time()
-        stage = STAGES[self.stage_id](len(self.sessions))
-        self.world = GameWorld(sorted(self.sessions), stage=stage, stocks=self.stocks, match_id=uuid4().hex)
-        for fighter in self.world.fighters:
-            fighter.character = self.sessions[fighter.player_id].character
-        self.world.phase = "countdown"
-        self._starts_at = now + self.countdown
-        for session in self.sessions.values():
-            session.reset_inputs(now)
-        players = [{"id": s.player_id, "name": s.name, "character": s.character}
-                   for s in sorted(self.sessions.values(), key=lambda s: s.player_id)]
-        self._broadcast(protocol.match_start(self.world.stage, players, self.countdown))
-        self._lobby()
-        self._snapshot()
-
-    def _reset_lobby(self):
-        self.world = None
-        for session in self.sessions.values():
-            session.ready = session.rematch = False
-            session.latest_snapshot = None
-        self._lobby()
-
     # ---- one connection ----------------------------------------------------
 
     async def _handle(self, ws: ServerConnection):
-        session = None
+        session = room = None
         write_task = None
         try:
             hello = validate_client(decode(await asyncio.wait_for(ws.recv(), timeout=5.0)))
             if hello["type"] != "hello":
                 raise ProtocolError("hello must be the first message")
-            if self.world is not None:
-                raise ProtocolError("match in progress; join after it ends")
-            free = [i for i in range(self.capacity) if i not in self.sessions]
-            if not free:
-                raise ProtocolError("lobby is full")
-            session = Session(free[0], hello["name"].strip(), hello["character"], ws)
-            self.sessions[session.player_id] = session
+            if hello["room"] is not None:
+                room = self.rooms.get(hello["room"])
+                if room is None or room.mode != "friends":
+                    raise ProtocolError(f"room {hello['room']} doesn't exist; ask for a new link")
+            else:
+                room = self._new_room(hello["mode"])
+            session = room.join(hello["name"].strip(), hello["character"], ws)
             write_task = asyncio.create_task(session.write_loop())
-            session.send(protocol.welcome(session.player_id, self.room, self.link))
-            self._lobby()
 
             loop = asyncio.get_running_loop()
             rate_start, messages = loop.time(), 0
@@ -296,31 +421,9 @@ class GameServer:
                 messages += 1
                 if messages > MAX_MESSAGES_PER_SECOND:
                     raise ProtocolError("message rate exceeded")
-                kind = message["type"]
-                if kind == "leave":
+                if message["type"] == "leave":
                     break
-                if kind == "landmarks":
-                    if self.world and self.world.phase == "playing":
-                        session.accept_frame(message["frame"], now)
-                elif kind == "character" and self.world is None:
-                    session.character = message["character"]
-                    self._lobby()
-                elif kind == "stage" and self.world is None and session.player_id == self._host():
-                    self.stage_id = message["stage"]
-                    self._lobby()
-                elif kind == "calibrate":
-                    session.set_calibration(message["calibration"])
-                elif kind == "ready" and self.world is None:
-                    session.ready = message["ready"]
-                    self._lobby()
-                    self._start_if_ready()
-                elif kind == "rematch" and self.world and self.world.phase == "finished":
-                    session.rematch = True
-                    self._lobby()
-                    if all(s.rematch for s in self.sessions.values()):
-                        self._reset_lobby()
-                elif kind == "hello":
-                    raise ProtocolError("already joined")
+                room.handle(session, message, now)
         except ProtocolError as exc:
             try:
                 await asyncio.wait_for(ws.send(encode(protocol.error(str(exc)))), timeout=0.5)
@@ -335,19 +438,10 @@ class GameServer:
             if write_task:
                 write_task.cancel()
                 await asyncio.gather(write_task, return_exceptions=True)
-            if session and self.sessions.get(session.player_id) is session:
-                del self.sessions[session.player_id]
-                if not self._closing:
-                    if self.world:
-                        self.world.eliminate(session.player_id)
-                        self._publish_events()
-                        self._snapshot()
-                    if not self.sessions:
-                        self.world = None
-                    elif (self.world and self.world.phase == "finished"
-                          and all(s.rematch for s in self.sessions.values())):
-                        self._reset_lobby()
-                    self._lobby()
+            if session and room and not self._closing:
+                room.leave(session)
+            if room and not room.sessions and self.rooms.get(room.code) is room:
+                del self.rooms[room.code]
 
     # ---- the clock -----------------------------------------------------------
 
@@ -359,34 +453,17 @@ class GameServer:
             now = loop.time()
             steps = 0
             while now >= next_tick and steps < 5:
-                if self.world:
-                    if self.world.phase == "countdown" and now >= self._starts_at:
-                        self.world.phase = "playing"
-                        for s in self.sessions.values():
-                            s.last_input = now
-                        self._lobby()
-                    if self.world.phase == "playing":
-                        for s in list(self.sessions.values()):
-                            if now - s.last_input > DISCONNECT_SECONDS:
-                                s.close()  # camera stopped sending; the handler removes them
-                        lives = {f.player_id: f.life_id for f in self.world.fighters}
-                        self.world.step({s.player_id: s.consume(now) for s in self.sessions.values()})
-                        for f in self.world.fighters:
-                            if f.life_id != lives[f.player_id] and f.player_id in self.sessions:
-                                self.sessions[f.player_id].actions.clear()  # no attacks queued across a KO
-                        finished = self.world.phase == "finished"
-                        self._publish_events()
-                        if finished:
-                            self._snapshot()
-                            self._lobby()  # phase "finished": browsers show rematch
+                for room in list(self.rooms.values()):
+                    room.tick(now, dt)
                 next_tick += dt
                 steps += 1
             if now >= next_tick:
                 self.tick_overruns += 1
                 next_tick = now + dt
             if now >= next_snapshot:
-                if self.world and self.world.phase != "finished":
-                    self._snapshot()
+                for room in list(self.rooms.values()):
+                    if room.world and room.world.phase != "finished":
+                        room.snapshot()
                 next_snapshot = now + 1 / config.SNAPSHOT_HZ
             await asyncio.sleep(max(0.0, min(next_tick, next_snapshot) - loop.time()))
 
@@ -398,17 +475,16 @@ def _response(status: int, reason: str, body: bytes, content_type: str) -> Respo
 
 
 async def serve(args):
-    server = await GameServer(args.host, args.port, args.players, args.stocks,
-                              public_url=args.public_url).start()
+    server = await GameServer(args.host, args.port, args.stocks, public_url=args.public_url).start()
     host, port = server.address
-    print(f"Smash CV server for {args.players} players, room {server.room}", flush=True)
+    print("Smash CV server running. Players choose vs CPU or with friends on the start page.", flush=True)
     print(f"  On this computer:  http://127.0.0.1:{port}/", flush=True)
     if not args.public_url:
         print("  For friends on other computers, the link must be https (browsers only allow the",
               flush=True)
         print(f"  camera on https). For example: cloudflared tunnel --url http://localhost:{port}",
               flush=True)
-        print("  then share the https link it prints.", flush=True)
+        print("  then restart with --public-url <the https link> so room links use it.", flush=True)
     try:
         await asyncio.Event().wait()
     finally:

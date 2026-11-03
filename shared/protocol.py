@@ -30,19 +30,21 @@ class LobbyPlayer:
     ready: bool = False
     connected: bool = True
     rematch: bool = False   # voted to play again after game over
+    cpu: bool = False       # the computer opponent in a vs-CPU room
 
 
-def welcome(player_id: int, room: str, link: str) -> dict:
-    """First message after joining: who you are and the link to share."""
-    return {"type": "welcome", "player_id": player_id, "room": room, "link": link}
+def welcome(player_id: int, room: str, link: str, mode: str) -> dict:
+    """First message after joining: who you are, the room, and (with friends) the link to share."""
+    return {"type": "welcome", "player_id": player_id, "room": room, "link": link, "mode": mode}
 
 
 def lobby(room: str, link: str, host: int | None, stage: str, phase: str, capacity: int,
-          players: list[LobbyPlayer]) -> dict:
+          players: list[LobbyPlayer], mode: str) -> dict:
     """Sent to everyone whenever anyone joins, leaves, readies up or votes for a rematch.
 
     `stage` is the id of the stage the host picked (see STAGES in game/stage.py).
-    `phase` is "lobby", "countdown", "playing" or "finished".
+    `phase` is "lobby", "countdown", "playing" or "finished". `mode` is "cpu" or
+    "friends"; `capacity` is how many humans the room holds.
     """
     return {
         "type": "lobby",
@@ -52,9 +54,10 @@ def lobby(room: str, link: str, host: int | None, stage: str, phase: str, capaci
         "stage": stage,
         "phase": phase,
         "capacity": capacity,
+        "mode": mode,
         "players": [
             {"id": p.id, "name": p.name, "character": p.character, "ready": p.ready,
-             "connected": p.connected, "rematch": p.rematch}
+             "connected": p.connected, "rematch": p.rematch, "cpu": p.cpu}
             for p in players
         ],
     }
