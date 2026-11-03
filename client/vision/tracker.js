@@ -16,11 +16,11 @@ export class Tracker {
     self.ctx = self.canvas.getContext("2d");
     const fileset = await FilesetResolver.forVisionTasks(WASM);
     self.pose = await PoseLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: `${MODEL}/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task` },
+      baseOptions: { modelAssetPath: `${MODEL}/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task`, delegate: "GPU" },
       runningMode: "VIDEO", numPoses: 1,
     });
     self.gestures = await GestureRecognizer.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: `${MODEL}/gesture_recognizer/gesture_recognizer/float16/latest/gesture_recognizer.task` },
+      baseOptions: { modelAssetPath: `${MODEL}/gesture_recognizer/gesture_recognizer/float16/latest/gesture_recognizer.task`, delegate: "GPU" },
       runningMode: "VIDEO", numHands: 2,
     });
     return self;
