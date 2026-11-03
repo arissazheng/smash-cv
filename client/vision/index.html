@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8"><title>Smash CV vision debug</title>
+<body style="margin:0;background:#111;color:#fff;font:14px monospace">
+<video id="v" playsinline muted hidden></video>
+<canvas id="c" width="640" height="480"></canvas>
+<div><button id="cal">Calibrate (sit neutral, 2s)</button> <span id="msg"></span></div>
+<script type="module">
+  import { Tracker } from "./tracker.js";
+  import { LandmarkSmoother } from "./smoothing.js";
+  import { drawOverlay } from "./overlay.js";
+  import { collectFrames, fromFrames } from "./calibration.js";
+  const tracker = await Tracker.create(document.getElementById("v"));
+  const smoother = new LandmarkSmoother();
+  const ctx = document.getElementById("c").getContext("2d");
+  let latest = null;
+  document.getElementById("cal").onclick = async () => {
+    const msg = document.getElementById("msg");
+    const frames = await collectFrames(() => latest, { onTick: (s, ok) => msg.textContent = ok ? `hold still... ${s.toFixed(1)}s` : "no person in view" });
+    // TODO(Person 3): send {type: "calibrate", frames} via client/net.js (server computes Calibration)
+    try { msg.textContent = JSON.stringify(fromFrames(frames)); } catch (e) { msg.textContent = e.message; }
+  };
+  let last = performance.now(), fps = 0;
+  (function loop() {
+    const raw = tracker.process();
+    if (raw) {
+      const frame = smoother.smooth(raw); latest = frame;
+      // TODO(Person 3): send `frame` as a `landmarks` message via client/net.js
+      const now = performance.now(); fps = 0.9 * fps + 0.1 * 1000 / (now - last); last = now;
+      drawOverlay(ctx, tracker.canvas, frame, fps);
+    }
+    requestAnimationFrame(loop);
+  })();
+</script>
