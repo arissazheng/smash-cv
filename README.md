@@ -29,7 +29,14 @@ python main.py play --replay recordings/jab/<file>.jsonl   # a recording vs CPU,
 
 python -m gestures.recorder --label jab --player <you>      # record a labeled gesture clip
 python -m ui.sprite_pipeline sheet.png assets/characters/<name>/<action>   # slice a sprite sheet
-pytest                                     # tests, no camera needed
+pytest                                     # Python tests, no camera needed
+```
+
+Browser renderer demo, with a fake server and no camera:
+
+```bash
+python -m http.server 8000 -d client       # then open http://localhost:8000/render/demo.html
+node --test client/                        # JavaScript tests (Node 18+)
 ```
 
 Close the game window to quit. In the overlay and recorder windows, press `q`.
@@ -93,15 +100,16 @@ flowchart LR
 
 ### Messages
 
-All messages are JSON over one WebSocket per player. They are defined in `shared/protocol.py`. Like `ControllerState`, change them only when all four of us agree.
+All messages are JSON over one WebSocket per player. Server messages are built by `shared/protocol.py` and read by `client/render/protocol.js`. Like `ControllerState`, change them only when all four of us agree.
 
 | Direction | Message | Contents | When |
 | --- | --- | --- | --- |
 | browser → server | `join` | room code, name, character | Opening the link |
 | browser → server | `calibrate` | about 2 s of landmark frames while sitting neutral | Before the first match |
 | browser → server | `landmarks` | one `LandmarkFrame` | Every camera frame |
+| server → browser | `match_start` | stage layout (ground, platforms, background), players and characters | When a match begins |
 | server → browser | `lobby` | players in the room, characters, who is ready | When anyone joins, leaves or picks |
-| server → browser | `snapshot` | tick number, and each fighter's position, animation state, facing, damage % and stocks | About 30 times a second |
+| server → browser | `snapshot` | tick, server time, and for each fighter: id, character, x, y, body size, facing, animation state, damage %, stocks, shield, active hitbox | About 30 times a second |
 | server → browser | `event` | hit, KO, game over | When it happens |
 
 ### Data types
@@ -161,8 +169,12 @@ one Python process and draws with pygame. Most of it carries over as is.
 Still stubs: special, up special, shield, grab, taunt, pause detectors; menus;
 real sprites.
 
-Not built yet: the game server, rooms and shareable links, the browser client
-and the message protocol.
+Browser renderer (`client/render/`): draws `match_start` and `snapshot`
+messages on a canvas as boxes, slides smoothly between snapshots, and shows
+damage % and stocks. `render/demo.html` runs it against a fake server.
+
+Not built yet: the game server, rooms and shareable links, browser camera
+tracking, lobby and menus, and sprites in the browser.
 
 ## Conventions
 

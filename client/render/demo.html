@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smash CV renderer demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0c18; color: #d8dcef; font: 14px system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: auto 1fr; }
+    .bar { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; padding: 10px 16px; }
+    .bar strong { margin-right: auto; }
+    label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+    main { display: grid; place-items: center; min-height: 0; padding: 0 16px 16px; }
+    canvas {
+      width: min(100%, calc((100vh - 70px) * 16 / 9));
+      aspect-ratio: 16 / 9;
+      image-rendering: pixelated;
+      background: #181a30;
+    }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <strong>Renderer demo · fake server</strong>
+    <label><input type="checkbox" id="smoothing" checked> Smooth between snapshots</label>
+    <label><input type="checkbox" id="jitter" checked> Simulate network jitter</label>
+    <label><input type="checkbox" id="hitboxes"> Show hitboxes</label>
+  </div>
+  <main><canvas id="game"></canvas></main>
+
+  <script type="module">
+    import { Renderer } from "./renderer.js";
+    import { FakeServer } from "./fake_server.js";
+
+    const renderer = new Renderer(document.getElementById("game"));
+    const server = new FakeServer((message) => renderer.receive(message));
+    server.start();
+    renderer.start();
+
+    document.getElementById("smoothing").addEventListener("change", (e) => { renderer.smoothing = e.target.checked; });
+    document.getElementById("jitter").addEventListener("change", (e) => { server.jitter = e.target.checked ? 0.03 : 0; });
+    document.getElementById("hitboxes").addEventListener("change", (e) => { renderer.showHitboxes = e.target.checked; });
+  </script>
+</body>
+</html>
