@@ -38,12 +38,17 @@ export class SnapshotBuffer {
     return this.snapshots[this.snapshots.length - 1] ?? null;
   }
 
+  /** The server time being drawn at client time `now`, or null before any snapshot. */
+  renderTime(now) {
+    return this.offset === null ? null : now - this.offset - this.delay;
+  }
+
   /** The match as it should look at client time `now`, or null before any snapshot. */
   sample(now) {
     const s = this.snapshots;
     if (s.length === 0) return null;
 
-    const target = now - this.offset - this.delay; // in server time
+    const target = this.renderTime(now);
     if (target <= s[0].t) return s[0];
     if (target >= s[s.length - 1].t) return s[s.length - 1]; // never guess ahead
 

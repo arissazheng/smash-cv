@@ -36,7 +36,7 @@ Browser renderer demo, with a fake server and no camera:
 
 ```bash
 python -m http.server 8000 -d client       # then open http://localhost:8000/render/demo.html
-node --test client/                        # JavaScript tests (Node 18+)
+cd client && npm test                      # JavaScript tests (Node 18+)
 ```
 
 Close the game window to quit. In the overlay and recorder windows, press `q`.
@@ -108,9 +108,17 @@ All messages are JSON over one WebSocket per player. Server messages are built b
 | browser → server | `calibrate` | about 2 s of landmark frames while sitting neutral | Before the first match |
 | browser → server | `landmarks` | one `LandmarkFrame` | Every camera frame |
 | server → browser | `match_start` | stage layout (ground, platforms, background), players and characters | When a match begins |
-| server → browser | `lobby` | players in the room, characters, who is ready | When anyone joins, leaves or picks |
+| server → browser | `lobby` | room code, link, host, stage, and each player's name, character, ready and connected | When anyone joins, leaves or picks |
 | server → browser | `snapshot` | tick, server time, and for each fighter: id, character, x, y, body size, facing, animation state, damage %, stocks, shield, active hitbox | About 30 times a second |
-| server → browser | `event` | hit, KO, game over | When it happens |
+| server → browser | `event` | tick and server time, plus: `hit` (attacker, target, attack, damage, shielded, where it landed), `ko` (player, stocks left, where they left), or `game_over` (winner, or null for a draw) | When it happens |
+
+**Keeping both sides in sync.** `shared/protocol_examples/` holds one real
+example of every server message, built from the actual game. Python tests check
+the server still produces messages shaped like them, and JavaScript tests check
+the renderer can draw them. If you rename or remove a field, a test on one side
+fails right away. To change a message on purpose, run
+`python tools/update_protocol_examples.py`, update `client/render/protocol.js`
+to match, and tell the team.
 
 ### Data types
 
@@ -169,9 +177,11 @@ one Python process and draws with pygame. Most of it carries over as is.
 Still stubs: special, up special, shield, grab, taunt, pause detectors; menus;
 real sprites.
 
-Browser renderer (`client/render/`): draws `match_start` and `snapshot`
-messages on a canvas as boxes, slides smoothly between snapshots, and shows
-damage % and stocks. `render/demo.html` runs it against a fake server.
+Browser renderer (`client/render/`): draws `match_start`, `snapshot` and
+`event` messages on a canvas: box fighters, smooth movement between snapshots,
+damage % and stocks, hit sparks, KO bursts with screen shake, and the "GAME!"
+screen. `render/demo.html` runs it against a fake server. The game reports
+hits, KOs and game over each tick (`game/events.py`).
 
 Not built yet: the game server, rooms and shareable links, browser camera
 tracking, lobby and menus, and sprites in the browser.

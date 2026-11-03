@@ -1,0 +1,7 @@
+{
+  "type": "event",
+  "tick": 61,
+  "t": 1.0167,
+  "kind": "game_over",
+  "winner": 0
+}

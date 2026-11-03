@@ -1,0 +1,47 @@
+{
+  "type": "match_start",
+  "stage": {
+    "name": "Battlefield",
+    "width": 1280,
+    "height": 720,
+    "main": [
+      240,
+      520,
+      800,
+      40
+    ],
+    "platforms": [
+      [
+        340,
+        380,
+        180,
+        12
+      ],
+      [
+        760,
+        380,
+        180,
+        12
+      ],
+      [
+        550,
+        250,
+        180,
+        12
+      ]
+    ],
+    "background": null
+  },
+  "players": [
+    {
+      "id": 0,
+      "name": "Arissa",
+      "character": "golden_bear"
+    },
+    {
+      "id": 1,
+      "name": "Sam",
+      "character": "campus_squirrel"
+    }
+  ]
+}

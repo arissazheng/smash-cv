@@ -3,9 +3,11 @@
 //
 // Owner: Person 4.
 //
-// It sends the same message shapes as the real server (see protocol.js): one
-// match_start, then snapshots about 30 times a second, optionally with
-// network-like jitter so you can see what snapshot smoothing does.
+// It sends the same message shapes as the real server (see protocol.js):
+// match_start, then snapshots about 30 times a second, with hit, KO and
+// game-over events along the way. Snapshots can arrive with network-like
+// jitter so you can see what snapshot smoothing does. The match restarts a
+// few seconds after "GAME!".
 
 import { SNAPSHOT_RATE } from "./protocol.js";
 
@@ -21,6 +23,9 @@ export const MEMORIAL_GLADE = {
 
 const GROUND_Y = 520;
 const BODY = { w: 60, h: 90 };
+const KO_EVERY = 15;     // seconds between the squirrel's KOs
+export const MATCH_LENGTH = 3 * KO_EVERY; // squirrel has 3 stocks
+const RESTART_AFTER = 4; // seconds of "GAME!" before a new match
 
 /** Where each scripted fighter is at time t (seconds). Pure, so tests can call it. */
 export function scriptedFighters(t) {
@@ -46,13 +51,14 @@ function bear(t) {
     character: "golden_bear",
     x, y, ...BODY, facing, state,
     damage: (Math.floor(t / 5) * 4) % 160,
-    stocks: 3 - (Math.floor(t / 40) % 3),
+    stocks: 3,
     shield: false,
     hitbox: jabbing ? [x + facing * 50 - 25, y - 70, 50, 30] : null,
   };
 }
 
-// Player 2 wanders slowly, gets hit every 3 s and shields now and then.
+// Player 2 wanders slowly, gets hit every 3 s, shields now and then, and is
+// KO'd every 15 s.
 function squirrel(t) {
   const x = 640 - 200 * Math.sin(t * 0.5);
   const hurt = t % 3 < 0.4;
@@ -64,21 +70,47 @@ function squirrel(t) {
     facing: Math.cos(t * 0.5) >= 0 ? -1 : 1,
     state: hurt ? "hurt" : shield ? "shield" : "run",
     damage: (Math.floor(t / 3) * 7) % 160,
-    stocks: 3,
+    stocks: Math.max(0, 3 - Math.floor(t / KO_EVERY)),
     shield,
     hitbox: null,
   };
+}
+
+/** Events between script times `prev` and `t`. Pure, so tests can call it. */
+export function scriptedEvents(prev, t) {
+  const events = [];
+  const crossed = (period) => Math.floor(t / period) > Math.floor(prev / period);
+  const [b, s] = scriptedFighters(t);
+
+  if (crossed(3) && t < MATCH_LENGTH) {
+    events.push({ kind: "hit", attacker: 0, target: 1, attack: crossed(9) ? "smash" : "jab",
+      damage: crossed(9) ? 15 : 7, shielded: false, x: s.x - b.facing * 20, y: s.y - 55 });
+  }
+  if (crossed(KO_EVERY) && t <= MATCH_LENGTH + 0.1) {
+    events.push({ kind: "ko", player: 1, stocks_left: s.stocks, x: -60, y: 300 });
+    if (s.stocks === 0) events.push({ kind: "game_over", winner: 0 });
+  }
+  return events;
 }
 
 export class FakeServer {
   /** @param {(message: object) => void} onMessage */
   constructor(onMessage, { jitter = 0.03 } = {}) {
     this.onMessage = onMessage;
-    this.jitter = jitter; // max random extra delay per snapshot, seconds
+    this.jitter = jitter; // max random extra delay per message, seconds
     this._timer = null;
   }
 
   start() {
+    this._newMatch();
+    this._timer = setInterval(() => this._step(), 1000 / SNAPSHOT_RATE);
+  }
+
+  stop() {
+    clearInterval(this._timer);
+  }
+
+  _newMatch() {
     this.onMessage({
       type: "match_start",
       stage: MEMORIAL_GLADE,
@@ -87,19 +119,28 @@ export class FakeServer {
         { id: 1, name: "CPU", character: "campus_squirrel" },
       ],
     });
-    const start = performance.now() / 1000;
-    let tick = 0;
-    this._timer = setInterval(() => {
-      tick += 1;
-      const t = performance.now() / 1000 - start;
-      const snapshot = { type: "snapshot", tick, t, fighters: scriptedFighters(t) };
-      // Real networks deliver unevenly; this makes snapshots arrive late by a random amount.
-      const delay = Math.random() * this.jitter * 1000;
-      setTimeout(() => this.onMessage(snapshot), delay);
-    }, 1000 / SNAPSHOT_RATE);
+    this._start = performance.now() / 1000;
+    this._tick = 0;
+    this._prevT = 0;
   }
 
-  stop() {
-    clearInterval(this._timer);
+  _step() {
+    const t = performance.now() / 1000 - this._start;
+    if (t > MATCH_LENGTH + RESTART_AFTER) {
+      this._newMatch();
+      return;
+    }
+    this._tick += 1;
+    const scriptT = Math.min(t, MATCH_LENGTH); // freeze the picture after GAME!
+    this._send({ type: "snapshot", tick: this._tick, t, fighters: scriptedFighters(scriptT) });
+    for (const e of scriptedEvents(this._prevT, t)) {
+      this._send({ type: "event", tick: this._tick, t, ...e });
+    }
+    this._prevT = t;
+  }
+
+  // Real networks deliver unevenly; this makes messages arrive late by a random amount.
+  _send(message) {
+    setTimeout(() => this.onMessage(message), Math.random() * this.jitter * 1000);
   }
 }

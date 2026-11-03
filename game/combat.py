@@ -11,6 +11,8 @@ import math
 
 import pygame
 
+from game.events import Hit
+
 
 @dataclass(frozen=True)
 class AttackData:
@@ -49,8 +51,12 @@ def launch_velocity(attack: AttackData, target_damage: float, facing: int) -> tu
     return facing * speed * math.cos(rad), -speed * math.sin(rad)  # y up is negative
 
 
-def resolve_hits(fighters) -> None:
-    """Apply each active hitbox to every other fighter, at most once per attack."""
+def resolve_hits(fighters) -> list[Hit]:
+    """Apply each active hitbox to every other fighter, at most once per attack.
+
+    Returns what landed, for hit sparks in the browser.
+    """
+    hits = []
     for attacker in fighters:
         box = attacker.hitbox()
         if box is None or attacker.attack_connected:
@@ -59,12 +65,16 @@ def resolve_hits(fighters) -> None:
             if target is attacker or not box.colliderect(target.rect):
                 continue
             data = ATTACKS[attacker.attack]
+            contact = box.clip(target.rect).center
             if target.shielding:
                 target.shield_health -= data.damage  # TODO(Person 3): shield breaks
+                hits.append(Hit(attacker.player_id, target.player_id, attacker.attack, 0.0, True, *contact))
             else:
                 target.damage += data.damage
                 target.take_hit(*launch_velocity(data, target.damage, attacker.facing))
+                hits.append(Hit(attacker.player_id, target.player_id, attacker.attack, data.damage, False, *contact))
             attacker.attack_connected = True
+    return hits
 
 
 def hitbox_rect(center: tuple[float, float], facing: int, attack: AttackData) -> pygame.Rect:

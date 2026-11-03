@@ -1,0 +1,40 @@
+{
+  "type": "snapshot",
+  "tick": 63,
+  "t": 1.05,
+  "fighters": [
+    {
+      "id": 0,
+      "character": "box",
+      "x": 600.0,
+      "y": 520,
+      "w": 60,
+      "h": 90,
+      "facing": 1,
+      "state": "jab",
+      "damage": 0.0,
+      "stocks": 2,
+      "shield": false,
+      "hitbox": [
+        625,
+        450,
+        50,
+        30
+      ]
+    },
+    {
+      "id": 1,
+      "character": "box",
+      "x": 660.0,
+      "y": 520,
+      "w": 60,
+      "h": 90,
+      "facing": -1,
+      "state": "hurt",
+      "damage": 3.0,
+      "stocks": 2,
+      "shield": false,
+      "hitbox": null
+    }
+  ]
+}

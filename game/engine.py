@@ -9,6 +9,7 @@ physics, resolve hits, check blast zones, draw.
 import pygame
 
 from game.combat import resolve_hits
+from game.events import KO, GameEvent, GameOver
 from game.fighter import Fighter
 from game.stage import Stage, battlefield
 from shared import config
@@ -25,7 +26,10 @@ class Game:
         self.controllers = []
         self.camera = camera  # optional CameraSource, for the picture-in-picture view
         self.paused = False
-        self.winner: int | None = None
+        self.over = False
+        self.winner: int | None = None  # None after a draw
+        self.tick_count = 0
+        self.events: list[GameEvent] = []  # what happened during the latest tick
 
     def set_controllers(self, controllers: list) -> None:
         """One controller per fighter, each with poll() -> ControllerState."""
@@ -33,29 +37,36 @@ class Game:
         self.controllers = controllers
 
     def tick(self, dt: float) -> None:
+        self.events = []
         states = [c.poll() for c in self.controllers]
         if any(s.pause for s in states):
             self.paused = not self.paused
-        if self.paused or self.winner is not None:
+        if self.paused or self.over:
             return
 
+        self.tick_count += 1
         for fighter, state in zip(self.fighters, states):
-            fighter.apply_input(state)
+            if fighter.stocks > 0:
+                fighter.apply_input(state)
         for fighter in self.fighters:
-            fighter.step(dt, self.stage)
-        resolve_hits(self.fighters)
+            if fighter.stocks > 0:
+                fighter.step(dt, self.stage)
+        self.events += resolve_hits([f for f in self.fighters if f.stocks > 0])
         self._check_blast_zones()
 
     def _check_blast_zones(self) -> None:
         for i, fighter in enumerate(self.fighters):
-            if self.stage.blast_zone.collidepoint(fighter.x, fighter.y):
+            if fighter.stocks <= 0 or self.stage.blast_zone.collidepoint(fighter.x, fighter.y):
                 continue
             fighter.stocks -= 1
+            self.events.append(KO(fighter.player_id, fighter.stocks, fighter.x, fighter.y))
             if fighter.stocks > 0:
                 fighter.respawn(self.stage.spawns[i])
         alive = [f for f in self.fighters if f.stocks > 0]
-        if len(alive) == 1:
-            self.winner = alive[0].player_id
+        if len(alive) <= 1:
+            self.over = True
+            self.winner = alive[0].player_id if alive else None
+            self.events.append(GameOver(self.winner))
 
     def run(self) -> None:
         pygame.init()
@@ -80,8 +91,8 @@ class Game:
                 hud.draw_camera_preview(screen, self.camera)
             if self.paused:
                 hud.draw_banner(screen, "PAUSED")
-            if self.winner is not None:
-                hud.draw_banner(screen, "GAME!", f"P{self.winner + 1} wins")
+            if self.over:
+                hud.draw_banner(screen, "GAME!", f"P{self.winner + 1} wins" if self.winner is not None else "Draw")
             pygame.display.flip()
             clock.tick(config.GAME_FPS)
         pygame.quit()

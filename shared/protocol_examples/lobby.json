@@ -1,0 +1,23 @@
+{
+  "type": "lobby",
+  "room": "ABCD",
+  "link": "https://example.com/room/ABCD",
+  "host": 0,
+  "stage": "Memorial Glade",
+  "players": [
+    {
+      "id": 0,
+      "name": "Arissa",
+      "character": "golden_bear",
+      "ready": true,
+      "connected": true
+    },
+    {
+      "id": 1,
+      "name": "Sam",
+      "character": "campus_squirrel",
+      "ready": false,
+      "connected": true
+    }
+  ]
+}

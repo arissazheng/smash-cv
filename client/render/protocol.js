@@ -1,7 +1,8 @@
 // Server -> browser messages the renderer reads.
 //
 // Owner: Person 4, agreed with Person 3. The Python side that builds these is
-// shared/protocol.py; change both together.
+// shared/protocol.py; change both together. One real example of each message
+// lives in shared/protocol_examples/, and tests on both sides check against it.
 //
 // Coordinates are game pixels on a 1280x720 stage, y grows downward, and a
 // fighter's (x, y) is the middle of its feet.
@@ -51,6 +52,37 @@
  * @property {boolean} shield
  * @property {?Rect} hitbox          active attack hitbox, or null
  */
+
+/**
+ * Sent to everyone in a room whenever anyone joins, leaves, picks or readies up.
+ * @typedef {object} Lobby
+ * @property {"lobby"} type
+ * @property {string} room           room code, e.g. "ABCD"
+ * @property {string} link           shareable link to the room
+ * @property {number} host           player id of the room's creator
+ * @property {string} stage
+ * @property {{id: number, name: string, character: string, ready: boolean, connected: boolean}[]} players
+ */
+
+/**
+ * Something that happened, stamped with the server time it happened at.
+ * Fields after `kind` depend on the kind (see EVENT_FIELDS).
+ * @typedef {object} GameEvent
+ * @property {"event"} type
+ * @property {number} tick
+ * @property {number} t
+ * @property {"hit" | "ko" | "game_over"} kind
+ */
+
+// Exact field lists, checked against shared/protocol_examples/ by the tests.
+export const FIGHTER_FIELDS = ["id", "character", "x", "y", "w", "h", "facing", "state", "damage", "stocks", "shield", "hitbox"];
+export const STAGE_FIELDS = ["name", "width", "height", "main", "platforms", "background"];
+export const LOBBY_PLAYER_FIELDS = ["id", "name", "character", "ready", "connected"];
+export const EVENT_FIELDS = {
+  hit: ["attacker", "target", "attack", "damage", "shielded", "x", "y"], // x, y = where it landed
+  ko: ["player", "stocks_left", "x", "y"],                               // x, y = where they left (off-screen)
+  game_over: ["winner"],                                                 // winner = player id, or null for a draw
+};
 
 export const GAME_WIDTH = 1280;
 export const GAME_HEIGHT = 720;

@@ -10,6 +10,7 @@
 // server sent, slightly in the past, sliding between snapshots.
 
 import { drawFighter, drawMessage, drawStage } from "./draw.js";
+import { Effects } from "./effects.js";
 import { drawHud } from "./hud.js";
 import { SnapshotBuffer } from "./interpolation.js";
 import { GAME_HEIGHT, GAME_WIDTH } from "./protocol.js";
@@ -29,6 +30,8 @@ export class Renderer {
     this.stage = null;
     this.names = new Map();
     this.stateSince = new Map(); // fighter id -> {state, since}, for animation timing
+    this.effects = new Effects(GAME_WIDTH, GAME_HEIGHT);
+    this.lobby = null; // latest lobby message, for the lobby screen
     this._running = false;
   }
 
@@ -39,9 +42,14 @@ export class Renderer {
       this.names = new Map(message.players.map((p) => [p.id, p.name]));
       this.buffer = new SnapshotBuffer({ delay: this.buffer.delay });
       this.stateSince.clear();
+      this.effects = new Effects(GAME_WIDTH, GAME_HEIGHT);
       // TODO(Person 4): load message.stage.background and each player's sprite atlas here.
     } else if (message.type === "snapshot") {
       this.buffer.push(message, arrival);
+    } else if (message.type === "event") {
+      this.effects.add(message);
+    } else if (message.type === "lobby") {
+      this.lobby = message; // TODO(Person 4): draw the lobby and character select from this
     }
   }
 
@@ -68,18 +76,25 @@ export class Renderer {
       drawMessage(ctx, GAME_WIDTH, GAME_HEIGHT, "Waiting for the match to start…");
       return;
     }
-    drawStage(ctx, this.stage);
-
     const snapshot = this.smoothing ? this.buffer.sample(time) : this.buffer.latest;
-    if (!snapshot) return;
+    const serverTime = this.smoothing ? this.buffer.renderTime(time) : (snapshot?.t ?? null);
+    this.effects.update(serverTime, time);
 
-    for (const fighter of snapshot.fighters) {
+    const [dx, dy] = this.effects.shakeOffset(time);
+    ctx.save();
+    ctx.translate(dx, dy);
+    drawStage(ctx, this.stage);
+    for (const fighter of snapshot?.fighters ?? []) {
       drawFighter(ctx, fighter, {
         stateTime: this._stateTime(fighter, time),
         showHitboxes: this.showHitboxes,
       });
     }
-    drawHud(ctx, snapshot.fighters, this.names, GAME_WIDTH, GAME_HEIGHT);
+    this.effects.draw(ctx, time);
+    ctx.restore();
+
+    if (snapshot) drawHud(ctx, snapshot.fighters, this.names, GAME_WIDTH, GAME_HEIGHT);
+    this.effects.drawBanner(ctx, this.names);
   }
 
   /** Seconds the fighter has been in its current state, tracked on the client. */

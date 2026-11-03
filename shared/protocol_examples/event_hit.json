@@ -1,0 +1,13 @@
+{
+  "type": "event",
+  "tick": 63,
+  "t": 1.05,
+  "kind": "hit",
+  "attacker": 0,
+  "target": 1,
+  "attack": "jab",
+  "damage": 3,
+  "shielded": false,
+  "x": 652,
+  "y": 465
+}
