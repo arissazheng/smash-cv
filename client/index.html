@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smash CV</title>
+  <!--
+    The play page: what the shareable link opens. Owner: Person 4 (screens)
+    with Person 1 (camera, client/vision/) and Person 3 (connection, client/net.js).
+
+    Join -> lobby (calibrate, ready) -> match -> rematch. The camera runs here;
+    only body landmarks are sent to the server.
+  -->
+  <style>
+    :root {
+      --bg: #1b1320; --panel: #2a1f2e; --line: #4a3a4f; --text: #efe6f2; --muted: #b3a5b8;
+      --gold: #fdb515; --blue: #3b6fd6; --red: #e64646; --green: #5fc46a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
+      font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    h1, h2 { margin: 0; font-family: "Courier New", monospace; letter-spacing: 0.04em; }
+    h1 { font-size: 28px; color: var(--gold); }
+    h2 { font-size: 16px; text-transform: uppercase; color: var(--muted); }
+    button { font: inherit; font-weight: 600; border: 2px solid var(--gold); background: var(--gold);
+      color: #1b1320; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+    button.secondary { background: transparent; color: var(--gold); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+    input[type=text] { font: inherit; padding: 8px 10px; border-radius: 6px; border: 2px solid var(--line);
+      background: var(--panel); color: var(--text); width: 100%; max-width: 280px; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 32px; display: grid; gap: 20px; }
+    .panel { background: var(--panel); border: 2px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .muted { color: var(--muted); }
+    .error { color: #ff9b9b; min-height: 1.4em; }
+    [hidden] { display: none !important; }
+
+    .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+    .pick { display: grid; justify-items: center; gap: 4px; padding: 10px 6px; border: 2px solid var(--line);
+      border-radius: 8px; background: #22182a; color: var(--text); cursor: pointer; text-align: center; }
+    .pick img { width: 64px; height: 88px; image-rendering: pixelated; }
+    .pick small { color: var(--muted); font-size: 12px; }
+    .pick[aria-pressed=true] { border-color: var(--gold); background: #3a2b20; }
+
+    .lobby { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 320px); gap: 16px; }
+    @media (max-width: 760px) { .lobby { grid-template-columns: 1fr; } }
+    .players { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+    .players li { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; background: #22182a; }
+    .players img { width: 32px; height: 44px; image-rendering: pixelated; }
+    .players .status { margin-left: auto; font-size: 13px; }
+    .link { font-family: "Courier New", monospace; word-break: break-all; background: #22182a; padding: 6px 8px; border-radius: 6px; }
+    .panel > * { min-width: 0; }
+    #preview { display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 4 / 3; background: #000; border-radius: 6px; }
+
+    .stage { position: relative; }
+    #game { display: block; width: 100%; aspect-ratio: 16 / 9; background: #181a30; border-radius: 8px; }
+    #corner { position: absolute; right: 10px; top: 10px; width: 22%; max-width: 200px; aspect-ratio: 4 / 3;
+      border: 2px solid var(--line); border-radius: 6px; background: #000; }
+    #countdown { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+      font: bold clamp(48px, 12vw, 140px) "Courier New", monospace; color: var(--gold);
+      text-shadow: 0 4px 0 #1b1320, 0 0 18px rgba(0,0,0,0.6); }
+    #rematch-bar { position: absolute; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; gap: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="row" style="justify-content: space-between">
+      <h1>SMASH CV</h1>
+      <span class="muted" id="status">Pick a fighter to join</span>
+    </header>
+
+    <!-- 1. Join -->
+    <section class="panel" id="join-view">
+      <h2>Your name</h2>
+      <input type="text" id="name" maxlength="24" placeholder="e.g. Arissa" autocomplete="nickname">
+      <h2>Choose your fighter</h2>
+      <div class="roster" id="roster"></div>
+      <div class="row">
+        <button id="join" disabled>Join match</button>
+        <span class="muted">Your camera turns on after you join. Only your body's position is sent, never video.</span>
+      </div>
+      <div class="error" id="join-error"></div>
+    </section>
+
+    <!-- 2. Lobby -->
+    <section class="lobby" id="lobby-view" hidden>
+      <div class="panel">
+        <h2>Room <span id="room"></span></h2>
+        <div>
+          <div class="muted">Share this link with your opponents:</div>
+          <div class="row"><span class="link" id="link"></span><button class="secondary" id="copy">Copy link</button></div>
+        </div>
+        <ul class="players" id="players"></ul>
+        <div class="row">
+          <button id="ready" disabled>Ready</button>
+          <span class="muted" id="ready-hint">Calibrate your camera first.</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Your camera</h2>
+        <canvas id="preview" width="640" height="480"></canvas>
+        <button class="secondary" id="calibrate" disabled>Calibrate: sit neutral for 2 s</button>
+        <div class="muted" id="calibrate-msg">Starting camera…</div>
+      </div>
+    </section>
+
+    <!-- 3. Match -->
+    <section class="stage" id="match-view" hidden>
+      <canvas id="game"></canvas>
+      <canvas id="corner" width="320" height="240"></canvas>
+      <div id="countdown" hidden></div>
+      <div id="rematch-bar" hidden><button id="rematch">Rematch</button></div>
+    </section>
+
+    <div class="error" id="error"></div>
+    <video id="video" playsinline muted hidden></video>
+  </div>
+
+  <script type="module">
+    import { CHARACTERS, portrait } from "/client/characters.js";
+    import { Connection } from "/client/net.js";
+    import { Renderer } from "/client/render/renderer.js";
+    import { LandmarkSmoother } from "/client/vision/smoothing.js";
+    import { drawOverlay } from "/client/vision/overlay.js";
+    import { collectFrames, fromFrames } from "/client/vision/calibration.js";
+
+    const $ = (id) => document.getElementById(id);
+    const SEND_INTERVAL = 1000 / 30; // landmarks at most 30 times a second
+
+    const state = { character: null, me: null, phase: "join", calibrated: false, latest: null, readyNow: false };
+    let connection, tracker, renderer;
+    const smoother = new LandmarkSmoother();
+
+    // ---- join ------------------------------------------------------------
+    for (const c of CHARACTERS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "pick";
+      b.setAttribute("aria-pressed", "false");
+      b.innerHTML = `<img alt="" src="${portrait(c.id)}"><span>${c.name}</span><small>${c.title}</small>`;
+      b.onclick = () => {
+        state.character = c.id;
+        for (const other of $("roster").children) other.setAttribute("aria-pressed", String(other === b));
+        updateJoin();
+      };
+      $("roster").append(b);
+    }
+    try { $("name").value = localStorage.getItem("smashcv-name") ?? ""; } catch {}
+    const updateJoin = () => { $("join").disabled = !($("name").value.trim() && state.character); };
+    $("name").oninput = updateJoin;
+
+    $("join").onclick = async () => {
+      const name = $("name").value.trim();
+      try { localStorage.setItem("smashcv-name", name); } catch {}
+      $("join").disabled = true;
+      $("join-error").textContent = "";
+      connection = new Connection();
+      renderer = new Renderer($("game"), { assetBase: "/assets" });
+      connection.listen(onMessage);
+      connection.listen((m) => renderer.receive(m));
+      renderer.start();
+      try {
+        await connection.open();
+      } catch (e) {
+        $("join-error").textContent = e.message;
+        updateJoin();
+        return;
+      }
+      connection.hello(name, state.character);
+      startCamera();
+    };
+
+    // ---- camera ----------------------------------------------------------
+    async function startCamera() {
+      try {
+        // Loaded here, not at the top: if the MediaPipe CDN is unreachable, joining still works
+        // and the player sees why the camera didn't start.
+        const { Tracker } = await import("/client/vision/tracker.js");
+        tracker = await Tracker.create($("video"));
+      } catch (e) {
+        const insecure = !window.isSecureContext ? " The link must start with https:// (or be localhost)." : "";
+        $("calibrate-msg").textContent = `Camera unavailable: ${e.message}.${insecure}`;
+        return;
+      }
+      $("calibrate-msg").textContent = "Sit back so your head, shoulders and hands are in view, then calibrate.";
+      $("calibrate").disabled = false;
+      let lastSent = 0, lastFrame = performance.now(), fps = 0;
+      (function loop() {
+        const raw = tracker.process();
+        if (raw) {
+          const frame = smoother.smooth(raw);
+          state.latest = frame;
+          const now = performance.now();
+          fps = 0.9 * fps + 0.1 * (1000 / Math.max(1, now - lastFrame));
+          lastFrame = now;
+          if (state.phase === "playing" && now - lastSent >= SEND_INTERVAL) {
+            connection.landmarks(frame);
+            lastSent = now;
+          }
+          const target = state.phase === "lobby" ? $("preview") : $("corner");
+          drawOverlay(target.getContext("2d"), tracker.canvas, frame, fps);
+        }
+        requestAnimationFrame(loop);
+      })();
+    }
+
+    $("calibrate").onclick = async () => {
+      $("calibrate").disabled = true;
+      const frames = await collectFrames(() => state.latest, {
+        onTick: (left, ok) => { $("calibrate-msg").textContent = ok ? `Hold still… ${left.toFixed(1)} s` : "Move so your whole upper body is in view"; },
+      });
+      try {
+        connection.calibrate(fromFrames(frames));
+        state.calibrated = true;
+        $("calibrate-msg").textContent = "Calibrated. Recalibrate any time you move your laptop.";
+      } catch (e) {
+        $("calibrate-msg").textContent = `Calibration failed: ${e.message}. Try again.`;
+      }
+      $("calibrate").disabled = false;
+      $("ready").disabled = !state.calibrated;
+      $("ready-hint").textContent = state.calibrated ? "" : "Calibrate your camera first.";
+    };
+
+    // ---- lobby -----------------------------------------------------------
+    $("ready").onclick = () => {
+      state.readyNow = !state.readyNow;
+      connection.ready(state.readyNow);
+    };
+    $("copy").onclick = async () => {
+      try { await navigator.clipboard.writeText($("link").textContent); $("copy").textContent = "Copied"; }
+      catch { getSelection().selectAllChildren($("link")); }
+    };
+    $("rematch").onclick = () => { connection.rematch(); $("rematch").disabled = true; $("rematch").textContent = "Waiting for others…"; };
+
+    function renderLobby(lobby) {
+      $("room").textContent = lobby.room;
+      $("link").textContent = lobby.link;
+      $("players").replaceChildren(...lobby.players.map((p) => {
+        const li = document.createElement("li");
+        const you = p.id === state.me ? " (you)" : "";
+        const status = lobby.phase === "finished" ? (p.rematch ? "wants a rematch" : "") : (p.ready ? "ready" : "not ready");
+        li.innerHTML = `<img alt=""><span></span><span class="status"></span>`;
+        li.querySelector("img").src = portrait(p.character);
+        li.querySelector("span").textContent = `P${p.id + 1} · ${p.name}${you}`;
+        li.querySelector(".status").textContent = status;
+        li.querySelector(".status").style.color = p.ready || p.rematch ? "var(--green)" : "var(--muted)";
+        return li;
+      }));
+      const waiting = lobby.capacity - lobby.players.length;
+      const mine = lobby.players.find((p) => p.id === state.me);
+      state.readyNow = !!mine?.ready;
+      $("ready").textContent = state.readyNow ? "Not ready" : "Ready";
+      $("status").textContent = waiting > 0 ? `Waiting for ${waiting} more player${waiting > 1 ? "s" : ""}` : "Everyone's here: ready up";
+    }
+
+    // ---- server messages --------------------------------------------------
+    function show(view) {
+      $("join-view").hidden = view !== "join";
+      $("lobby-view").hidden = view !== "lobby";
+      $("match-view").hidden = view !== "match";
+    }
+
+    function onMessage(m) {
+      if (m.type === "welcome") {
+        state.me = m.player_id;
+        state.phase = "lobby";
+        show("lobby");
+      } else if (m.type === "lobby") {
+        renderLobby(m);
+        const previous = state.phase;
+        state.phase = m.phase;
+        if (m.phase === "lobby") {
+          show("lobby");
+          $("rematch-bar").hidden = true;
+        } else {
+          show("match");
+          $("rematch-bar").hidden = m.phase !== "finished";
+          if (m.phase === "finished" && previous !== "finished") {
+            $("rematch").disabled = false;
+            $("rematch").textContent = "Rematch";
+            $("status").textContent = "Game over";
+          }
+          if (m.phase === "playing") $("status").textContent = "Fight!";
+        }
+      } else if (m.type === "match_start") {
+        show("match");
+        countdown(m.countdown);
+      } else if (m.type === "error") {
+        $("error").textContent = m.message;
+        $("join-error").textContent = m.message;
+      } else if (m.type === "closed") {
+        $("status").textContent = "Disconnected from the server. Reload to rejoin.";
+      }
+    }
+
+    function countdown(seconds) {
+      const el = $("countdown");
+      const end = performance.now() + seconds * 1000;
+      el.hidden = false;
+      (function tick() {
+        const left = (end - performance.now()) / 1000;
+        if (left > 0) {
+          el.textContent = String(Math.ceil(left));
+          requestAnimationFrame(tick);
+        } else {
+          el.textContent = "GO!";
+          setTimeout(() => { el.hidden = true; }, 600);
+        }
+      })();
+    }
+
+    show("join");
+  </script>
+</body>
+</html>

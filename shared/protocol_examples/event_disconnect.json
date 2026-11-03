@@ -1,0 +1,7 @@
+{
+  "type": "event",
+  "tick": 60,
+  "t": 1.0,
+  "kind": "disconnect",
+  "player": 1
+}

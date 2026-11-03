@@ -7,7 +7,7 @@
 // to slide between. Times are in seconds.
 
 export const RENDER_DELAY = 0.1; // about 3 snapshots of cushion for network jitter
-const TELEPORT_DISTANCE = 300;    // farther than this in one step = respawn, don't slide
+const TELEPORT_DISTANCE = 300;    // a jump this big (or a new life_id) = respawn: don't slide
 
 export class SnapshotBuffer {
   constructor({ delay = RENDER_DELAY, maxSize = 60 } = {}) {
@@ -65,7 +65,8 @@ export function interpolate(a, b, alpha) {
   const before = new Map(a.fighters.map((f) => [f.id, f]));
   const fighters = b.fighters.map((fb) => {
     const fa = before.get(fb.id);
-    if (!fa || Math.hypot(fb.x - fa.x, fb.y - fa.y) > TELEPORT_DISTANCE) return fb;
+    const respawned = fa && fa.life_id !== fb.life_id;
+    if (!fa || respawned || Math.hypot(fb.x - fa.x, fb.y - fa.y) > TELEPORT_DISTANCE) return fb;
     return { ...fb, x: lerp(fa.x, fb.x, alpha), y: lerp(fa.y, fb.y, alpha) };
   });
   return { ...b, t: lerp(a.t, b.t, alpha), fighters };

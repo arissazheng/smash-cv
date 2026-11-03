@@ -47,34 +47,42 @@ def _game_with_jab_landing():
 def build_examples() -> dict[str, dict]:
     examples = {}
 
+    examples["welcome"] = protocol.welcome(0, "ABCD", "https://example.com/")
     examples["lobby"] = protocol.lobby(
         room="ABCD",
-        link="https://example.com/room/ABCD",
+        link="https://example.com/",
         host=0,
         stage="Memorial Glade",
+        phase="lobby",
+        capacity=2,
         players=[
-            protocol.LobbyPlayer(0, "Arissa", "golden_bear", ready=True),
-            protocol.LobbyPlayer(1, "Sam", "campus_squirrel"),
+            protocol.LobbyPlayer(0, "Arissa", "efros", ready=True),
+            protocol.LobbyPlayer(1, "Sam", "oski"),
         ],
     )
+    examples["error"] = protocol.error("lobby is full")
 
     game = _new_game()
     examples["match_start"] = protocol.match_start(game.stage, [
-        {"id": 0, "name": "Arissa", "character": "golden_bear"},
-        {"id": 1, "name": "Sam", "character": "campus_squirrel"},
-    ])
+        {"id": 0, "name": "Arissa", "character": "efros"},
+        {"id": 1, "name": "Sam", "character": "oski"},
+    ], countdown=1.5)
 
     game, hit_events = _game_with_jab_landing()
     # Snapshot taken mid-jab: one fighter has a hitbox, the other has null.
     game.fighters[0].attack, game.fighters[0].attack_time = "jab", 0.06
-    examples["snapshot"] = protocol.snapshot(game.fighters, game.tick_count, game.tick_count * DT)
-    examples["event_hit"] = protocol.event(hit_events[0], game.tick_count, game.tick_count * DT)
+    examples["snapshot"] = protocol.snapshot(game.fighters, game.tick_number, game.time)
+    examples["event_hit"] = protocol.event(hit_events[0], game.tick_number, game.time)
 
     game = _new_game(stocks=1)
     game.fighters[1].x = -1000.0  # off the left side: KO, and with 1 stock, game over
     game.tick(DT)
     ko, over = game.events
-    examples["event_ko"] = protocol.event(ko, game.tick_count, game.tick_count * DT)
-    examples["event_game_over"] = protocol.event(over, game.tick_count, game.tick_count * DT)
+    examples["event_ko"] = protocol.event(ko, game.tick_number, game.time)
+    examples["event_game_over"] = protocol.event(over, game.tick_number, game.time)
+
+    game = _new_game()
+    game.eliminate(1)  # player 2 disconnects
+    examples["event_disconnect"] = protocol.event(game.events[0], game.tick_number, game.time)
 
     return examples

@@ -118,4 +118,4 @@ def test_double_ko_is_a_draw():
     game.tick(1 / 60)
     over = [e for e in game.events if isinstance(e, GameOver)]
     assert len(over) == 1 and over[0].winner is None
-    assert game.over
+    assert game.phase == "finished" and game.result == "draw"

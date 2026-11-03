@@ -39,6 +39,9 @@ ATTACKS = {
     "grab": AttackData(0.06, 0.08, 0.30, 6, 200, 6, 45, (40, 40, 40, 0)),
 }
 
+# Every attack the gesture detectors can produce is playable.
+PLAYABLE_ATTACKS = tuple(ATTACKS)
+
 
 def knockback_speed(attack: AttackData, target_damage: float) -> float:
     """Smash-style: the more damage a fighter has, the farther they fly."""
@@ -52,28 +55,35 @@ def launch_velocity(attack: AttackData, target_damage: float, facing: int) -> tu
 
 
 def resolve_hits(fighters) -> list[Hit]:
-    """Apply each active hitbox to every other fighter, at most once per attack.
+    """Apply every active hitbox, at most once per target per attack.
 
-    Returns what landed, for hit sparks in the browser.
+    Contacts are collected before any hit is applied, so two fighters who hit
+    each other on the same tick trade. Returns what landed, for hit sparks.
     """
-    hits = []
+    contacts = []
     for attacker in fighters:
         box = attacker.hitbox()
-        if box is None or attacker.attack_connected:
+        if box is None:
             continue
         for target in fighters:
-            if target is attacker or not box.colliderect(target.rect):
+            if (target is attacker or target.stocks <= 0 or target.invulnerable > 0
+                    or target.player_id in attacker.hit_targets
+                    or not box.colliderect(target.rect)):
                 continue
-            data = ATTACKS[attacker.attack]
             contact = box.clip(target.rect).center
-            if target.shielding:
-                target.shield_health -= data.damage  # TODO(Person 3): shield breaks
-                hits.append(Hit(attacker.player_id, target.player_id, attacker.attack, 0.0, True, *contact))
-            else:
-                target.damage += data.damage
-                target.take_hit(*launch_velocity(data, target.damage, attacker.facing))
-                hits.append(Hit(attacker.player_id, target.player_id, attacker.attack, data.damage, False, *contact))
+            contacts.append((attacker, target, ATTACKS[attacker.attack], attacker.attack, attacker.facing, contact))
+            attacker.hit_targets.add(target.player_id)
             attacker.attack_connected = True
+
+    hits = []
+    for attacker, target, data, attack, facing, contact in contacts:
+        if target.shielding:
+            target.shield_health = max(0.0, target.shield_health - data.damage)  # TODO(Person 3): shield breaks
+            hits.append(Hit(attacker.player_id, target.player_id, attack, 0.0, True, *contact))
+        else:
+            target.damage += data.damage
+            target.take_hit(*launch_velocity(data, target.damage, facing))
+            hits.append(Hit(attacker.player_id, target.player_id, attack, data.damage, False, *contact))
     return hits
 
 

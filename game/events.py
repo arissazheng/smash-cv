@@ -31,4 +31,9 @@ class GameOver:
     winner: int | None   # None = draw (last fighters KO'd on the same tick)
 
 
-GameEvent = Hit | KO | GameOver
+@dataclass
+class Disconnect:
+    player: int          # left mid-match and was removed
+
+
+GameEvent = Hit | KO | GameOver | Disconnect

@@ -15,6 +15,9 @@ import { Effects } from "../effects.js";
 import { scriptedEvents, scriptedFighters, MATCH_LENGTH } from "../fake_server.js";
 import { EVENT_FIELDS, FIGHTER_FIELDS, LOBBY_PLAYER_FIELDS, STAGE_FIELDS } from "../protocol.js";
 import { Renderer } from "../renderer.js";
+import { interpolate } from "../interpolation.js";
+import { PROTOCOL_VERSION } from "../../net.js";
+import { CHARACTERS } from "../../characters.js";
 
 const EXAMPLES_DIR = new URL("../../../shared/protocol_examples/", import.meta.url);
 const example = (name) => JSON.parse(readFileSync(new URL(`${name}.json`, EXAMPLES_DIR), "utf8"));
@@ -22,7 +25,8 @@ const sorted = (keys) => [...keys].sort();
 
 test("examples exist for every message the renderer handles", () => {
   const names = readdirSync(EXAMPLES_DIR).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5));
-  for (const name of ["lobby", "match_start", "snapshot", "event_hit", "event_ko", "event_game_over"]) {
+  for (const name of ["welcome", "lobby", "error", "match_start", "snapshot", "event_hit", "event_ko",
+                      "event_game_over", "event_disconnect"]) {
     assert.ok(names.includes(name), `missing shared/protocol_examples/${name}.json`);
   }
 });
@@ -40,7 +44,7 @@ test("lobby players have exactly the fields in protocol.js", () => {
 });
 
 test("events have exactly the fields in protocol.js for their kind", () => {
-  for (const name of ["event_hit", "event_ko", "event_game_over"]) {
+  for (const name of ["event_hit", "event_ko", "event_game_over", "event_disconnect"]) {
     const { type, tick, t, kind, ...rest } = example(name);
     assert.equal(type, "event");
     assert.ok(Number.isFinite(tick) && Number.isFinite(t), `${name}: tick and t must be numbers`);
@@ -135,3 +139,24 @@ function recordingCanvas() {
   });
   return { canvas: { width: 0, height: 0, getContext: () => ctx }, problems, texts };
 }
+
+test("browser and server agree on the protocol version and the character list", () => {
+  const python = readFileSync(new URL("../../../network/protocol.py", import.meta.url), "utf8");
+  const version = Number(python.match(/^VERSION = (\d+)/m)[1]);
+  assert.equal(PROTOCOL_VERSION, version, "update PROTOCOL_VERSION in client/net.js");
+  const ids = [...python.match(/^CHARACTERS = \(([^)]*)\)/m)[1].matchAll(/"(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(CHARACTERS.map((c) => c.id), ids, "client/characters.js and network/protocol.py differ");
+});
+
+test("every character has a portrait", () => {
+  for (const c of CHARACTERS) {
+    const png = new URL(`../../../assets/characters/${c.id}/views/front.png`, import.meta.url);
+    assert.ok(readFileSync(png).length > 0, c.id);
+  }
+});
+
+test("a respawn snaps instead of sliding", () => {
+  const a = { type: "snapshot", tick: 1, t: 0, fighters: [{ ...example("snapshot").fighters[0], x: 100, life_id: 0 }] };
+  const b = { type: "snapshot", tick: 2, t: 0.1, fighters: [{ ...a.fighters[0], x: 150, life_id: 1 }] };
+  assert.equal(interpolate(a, b, 0.5).fighters[0].x, 150);
+});

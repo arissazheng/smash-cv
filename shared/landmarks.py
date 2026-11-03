@@ -70,7 +70,11 @@ class LandmarkFrame:
 
     @classmethod
     def from_json(cls, line: str) -> "LandmarkFrame":
-        d = json.loads(line)
+        return cls.from_dict(json.loads(line))
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "LandmarkFrame":
+        """From the decoded JSON form (what to_json writes and browsers send)."""
         pose = [tuple(p) for p in d["pose"]] if d["pose"] else None
         hands = [Hand(h["side"], [tuple(p) for p in h["lm"]], h["g"], h["gs"]) for h in d["hands"]]
         return cls(d["t"], pose, hands)

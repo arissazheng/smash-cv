@@ -53,6 +53,8 @@ function bear(t) {
     damage: (Math.floor(t / 5) * 4) % 160,
     stocks: 3,
     shield: false,
+    life_id: 0,
+    invulnerable: false,
     hitbox: jabbing ? [x + facing * 50 - 25, y - 70, 50, 30] : null,
   };
 }
@@ -72,6 +74,8 @@ function squirrel(t) {
     damage: (Math.floor(t / 3) * 7) % 160,
     stocks: Math.max(0, 3 - Math.floor(t / KO_EVERY)),
     shield,
+    life_id: Math.floor(t / KO_EVERY),
+    invulnerable: t > KO_EVERY && t % KO_EVERY < 1.5,   // blinks after each respawn
     hitbox: null,
   };
 }

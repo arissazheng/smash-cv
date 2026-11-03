@@ -15,6 +15,7 @@
  * @property {"match_start"} type
  * @property {Stage} stage
  * @property {{id: number, name: string, character: string}[]} players
+ * @property {number} countdown      seconds until play begins
  */
 
 /**
@@ -50,6 +51,8 @@
  * @property {number} damage         percent
  * @property {number} stocks
  * @property {boolean} shield
+ * @property {number} life_id      goes up on every respawn
+ * @property {boolean} invulnerable just respawned; can't be hit
  * @property {?Rect} hitbox          active attack hitbox, or null
  */
 
@@ -61,7 +64,9 @@
  * @property {string} link           shareable link to the room
  * @property {number} host           player id of the room's creator
  * @property {string} stage
- * @property {{id: number, name: string, character: string, ready: boolean, connected: boolean}[]} players
+ * @property {"lobby" | "countdown" | "playing" | "finished"} phase
+ * @property {number} capacity       players needed to start
+ * @property {{id: number, name: string, character: string, ready: boolean, connected: boolean, rematch: boolean}[]} players
  */
 
 /**
@@ -71,17 +76,18 @@
  * @property {"event"} type
  * @property {number} tick
  * @property {number} t
- * @property {"hit" | "ko" | "game_over"} kind
+ * @property {"hit" | "ko" | "game_over" | "disconnect"} kind
  */
 
 // Exact field lists, checked against shared/protocol_examples/ by the tests.
-export const FIGHTER_FIELDS = ["id", "character", "x", "y", "w", "h", "facing", "state", "damage", "stocks", "shield", "hitbox"];
+export const FIGHTER_FIELDS = ["id", "character", "x", "y", "w", "h", "facing", "state", "damage", "stocks", "shield", "life_id", "invulnerable", "hitbox"];
 export const STAGE_FIELDS = ["name", "width", "height", "main", "platforms", "background"];
-export const LOBBY_PLAYER_FIELDS = ["id", "name", "character", "ready", "connected"];
+export const LOBBY_PLAYER_FIELDS = ["id", "name", "character", "ready", "connected", "rematch"];
 export const EVENT_FIELDS = {
   hit: ["attacker", "target", "attack", "damage", "shielded", "x", "y"], // x, y = where it landed
   ko: ["player", "stocks_left", "x", "y"],                               // x, y = where they left (off-screen)
   game_over: ["winner"],                                                 // winner = player id, or null for a draw
+  disconnect: ["player"],                                                // left mid-match
 };
 
 export const GAME_WIDTH = 1280;

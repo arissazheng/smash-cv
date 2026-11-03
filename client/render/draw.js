@@ -33,9 +33,11 @@ export function drawStage(ctx, stage, background = null) {
 /**
  * @param {CanvasRenderingContext2D} ctx
  * @param {import("./protocol.js").FighterSnapshot} f
- * @param {{stateTime: number, showHitboxes: boolean}} look
+ * @param {{stateTime: number, time?: number, showHitboxes: boolean}} look
  */
-export function drawFighter(ctx, f, { stateTime, showHitboxes }) {
+export function drawFighter(ctx, f, { stateTime, time = 0, showHitboxes }) {
+  // Blink while invulnerable after respawning.
+  ctx.globalAlpha = f.invulnerable && Math.floor(time * 10) % 2 === 0 ? 0.35 : 1;
   const left = Math.round(f.x - f.w / 2);
   const top = Math.round(f.y - f.h);
 
@@ -65,6 +67,8 @@ export function drawFighter(ctx, f, { stateTime, showHitboxes }) {
     ctx.arc(f.x, f.y - f.h / 2, Math.max(f.w, f.h) * 0.62, 0, Math.PI * 2);
     ctx.stroke();
   }
+
+  ctx.globalAlpha = 1;
 
   if (showHitboxes && f.hitbox) {
     ctx.strokeStyle = HITBOX;

@@ -94,6 +94,7 @@ export class Renderer {
     for (const fighter of snapshot?.fighters ?? []) {
       drawFighter(ctx, fighter, {
         stateTime: this._stateTime(fighter, time),
+        time,
         showHitboxes: this.showHitboxes,
       });
     }

@@ -1,23 +1,27 @@
 {
   "type": "lobby",
   "room": "ABCD",
-  "link": "https://example.com/room/ABCD",
+  "link": "https://example.com/",
   "host": 0,
   "stage": "Memorial Glade",
+  "phase": "lobby",
+  "capacity": 2,
   "players": [
     {
       "id": 0,
       "name": "Arissa",
-      "character": "golden_bear",
+      "character": "efros",
       "ready": true,
-      "connected": true
+      "connected": true,
+      "rematch": false
     },
     {
       "id": 1,
       "name": "Sam",
-      "character": "campus_squirrel",
+      "character": "oski",
       "ready": false,
-      "connected": true
+      "connected": true,
+      "rematch": false
     }
   ]
 }

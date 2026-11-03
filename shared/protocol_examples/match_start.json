@@ -36,12 +36,13 @@
     {
       "id": 0,
       "name": "Arissa",
-      "character": "golden_bear"
+      "character": "efros"
     },
     {
       "id": 1,
       "name": "Sam",
-      "character": "campus_squirrel"
+      "character": "oski"
     }
-  ]
+  ],
+  "countdown": 1.5
 }

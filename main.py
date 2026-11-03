@@ -4,6 +4,8 @@
     python main.py calibrate --name arissa    # sit neutral for 3 s, saves calibration/arissa.json
     python main.py play --calibration arissa  # you (camera) vs CPU
     python main.py play --replay recordings/jab/arissa_20261017_120000.jsonl   # recording vs CPU
+    python main.py server                     # online match: players open the printed link in a browser
+    python main.py bot --replay recordings/jump/arissa_20261103.jsonl   # recorded player joins the server
 """
 
 import argparse
@@ -75,7 +77,6 @@ def calibrate(args):
 
 
 def play(args):
-    from controllers.camera_controller import CameraController
     from controllers.replay_controller import ReplayController
     from game.cpu import CpuController
     from game.engine import Game
@@ -86,6 +87,7 @@ def play(args):
     if args.replay:
         p1 = ReplayController(Path(args.replay), calibration, player_id=0)
     else:
+        from controllers.camera_controller import CameraController
         from vision.camera import CameraSource
         camera = CameraSource().start()
         p1 = CameraController(camera, calibration, player_id=0)
@@ -99,6 +101,25 @@ def play(args):
     finally:
         if camera is not None:
             camera.stop()
+
+
+def server(args):
+    import asyncio
+    from network.server import serve
+    asyncio.run(serve(args))
+
+
+def bot(args):
+    import asyncio
+    from network.client import replay
+    asyncio.run(replay(args.link, Path(args.replay), args.name, args.character))
+
+
+def positive_int(value):
+    result = int(value)
+    if result < 1:
+        raise argparse.ArgumentTypeError("must be positive")
+    return result
 
 
 def main():
@@ -116,11 +137,33 @@ def main():
     p = sub.add_parser("play", help="play a match")
     p.add_argument("--calibration", default="default")
     p.add_argument("--replay", help="drive player 1 from a recording instead of the camera")
-    p.add_argument("--stocks", type=int, default=2)
+    p.add_argument("--stocks", type=positive_int, default=2)
     p.set_defaults(func=play)
 
+    p = sub.add_parser("server", help="host an online match played in browsers")
+    p.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to accept other computers")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--players", type=int, choices=(2, 3, 4), default=2)
+    p.add_argument("--stocks", type=positive_int, default=2)
+    p.add_argument("--public-url", help="the https link players use, e.g. from a tunnel")
+    p.set_defaults(func=server)
+
+    p = sub.add_parser("bot", help="join a server as a player driven by a landmark recording")
+    p.add_argument("--link", default="http://127.0.0.1:8765/")
+    p.add_argument("--replay", required=True, help="landmark recording (.jsonl) to play on loop")
+    p.add_argument("--name", default="Replay")
+    p.add_argument("--character", default="oski")
+    p.set_defaults(func=bot)
+
     args = parser.parse_args()
-    args.func(args)
+    if getattr(args, "duration", None) is not None and args.duration <= 0:
+        parser.error("--duration must be positive")
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        pass
+    except (ConnectionError, OSError, ValueError) as exc:
+        parser.exit(1, f"{exc}\n")
 
 
 if __name__ == "__main__":

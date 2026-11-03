@@ -13,7 +13,7 @@ Each function returns a plain dict ready for json.dumps.
 
 from dataclasses import dataclass
 
-from game.events import KO, GameEvent, GameOver, Hit
+from game.events import KO, Disconnect, GameEvent, GameOver, Hit
 from game.stage import Stage
 from shared import config
 
@@ -29,25 +29,41 @@ class LobbyPlayer:
     character: str          # folder name in assets/characters/
     ready: bool = False
     connected: bool = True
+    rematch: bool = False   # voted to play again after game over
 
 
-def lobby(room: str, link: str, host: int, stage: str, players: list[LobbyPlayer]) -> dict:
-    """Sent to everyone in a room whenever anyone joins, leaves, picks or readies up."""
+def welcome(player_id: int, room: str, link: str) -> dict:
+    """First message after joining: who you are and the link to share."""
+    return {"type": "welcome", "player_id": player_id, "room": room, "link": link}
+
+
+def lobby(room: str, link: str, host: int | None, stage: str, phase: str, capacity: int,
+          players: list[LobbyPlayer]) -> dict:
+    """Sent to everyone whenever anyone joins, leaves, readies up or votes for a rematch.
+
+    `phase` is "lobby", "countdown", "playing" or "finished".
+    """
     return {
         "type": "lobby",
         "room": room,
         "link": link,
         "host": host,
         "stage": stage,
+        "phase": phase,
+        "capacity": capacity,
         "players": [
-            {"id": p.id, "name": p.name, "character": p.character, "ready": p.ready, "connected": p.connected}
+            {"id": p.id, "name": p.name, "character": p.character, "ready": p.ready,
+             "connected": p.connected, "rematch": p.rematch}
             for p in players
         ],
     }
 
 
-def match_start(stage: Stage, players: list[dict]) -> dict:
-    """`players`: [{"id": 0, "name": "Arissa", "character": "golden_bear"}, ...]"""
+def match_start(stage: Stage, players: list[dict], countdown: float = 0.0) -> dict:
+    """`players`: [{"id": 0, "name": "Arissa", "character": "golden_bear"}, ...]
+
+    Play begins `countdown` seconds after this message.
+    """
     return {
         "type": "match_start",
         "stage": {
@@ -59,7 +75,12 @@ def match_start(stage: Stage, players: list[dict]) -> dict:
             "background": stage.background,
         },
         "players": players,
+        "countdown": round(countdown, 3),
     }
+
+
+def error(message: str) -> dict:
+    return {"type": "error", "message": message}
 
 
 def snapshot(fighters, tick: int, t: float) -> dict:
@@ -80,6 +101,8 @@ def snapshot(fighters, tick: int, t: float) -> dict:
                 "damage": round(f.damage, 1),
                 "stocks": f.stocks,
                 "shield": f.shielding,
+                "life_id": f.life_id,                # goes up on respawn: snap, don't slide
+                "invulnerable": f.invulnerable > 0,  # just respawned; can't be hit
                 "hitbox": _rect(box) if (box := f.hitbox()) is not None else None,
             }
             for f in fighters
@@ -102,4 +125,6 @@ def event(e: GameEvent, tick: int, t: float) -> dict:
                 "x": round(e.x, 1), "y": round(e.y, 1)}
     if isinstance(e, GameOver):
         return {**base, "kind": "game_over", "winner": e.winner}
+    if isinstance(e, Disconnect):
+        return {**base, "kind": "disconnect", "player": e.player}
     raise TypeError(f"unknown event {e!r}")

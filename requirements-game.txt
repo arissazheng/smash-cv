@@ -1,0 +1,3 @@
+# The game server and tests need no camera packages or model downloads.
+pygame>=2.5
+websockets>=13
