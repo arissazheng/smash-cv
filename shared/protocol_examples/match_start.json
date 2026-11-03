@@ -1,7 +1,7 @@
 {
   "type": "match_start",
   "stage": {
-    "name": "Battlefield",
+    "name": "Memorial Glade",
     "width": 1280,
     "height": 720,
     "main": [
@@ -30,7 +30,7 @@
         12
       ]
     ],
-    "background": null
+    "background": "memorial_glade.png"
   },
   "players": [
     {

@@ -26,9 +26,13 @@ export function drawHud(ctx, fighters, names, width, height) {
   fighters.forEach((f, i) => {
     const cx = Math.round(slot * (i + 1));
 
-    ctx.fillStyle = playerColor(f.id);
+    const name = names.get(f.id) ?? `P${f.id + 1}`;
     ctx.font = "bold 22px system-ui, sans-serif";
-    ctx.fillText(names.get(f.id) ?? `P${f.id + 1}`, cx, height - 98);
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "#101220"; // dark edge so names read over any stage art
+    ctx.strokeText(name, cx, height - 98);
+    ctx.fillStyle = playerColor(f.id);
+    ctx.fillText(name, cx, height - 98);
 
     ctx.font = "bold 56px system-ui, sans-serif";
     ctx.lineWidth = 6;

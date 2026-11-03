@@ -18,8 +18,11 @@ import { GAME_HEIGHT, GAME_WIDTH } from "./protocol.js";
 const now = () => performance.now() / 1000;
 
 export class Renderer {
-  /** @param {HTMLCanvasElement} canvas */
-  constructor(canvas, { showHitboxes = false, smoothing = true } = {}) {
+  /**
+   * @param {HTMLCanvasElement} canvas
+   * @param {{assetBase?: string}} options  URL of the repo's assets/ folder
+   */
+  constructor(canvas, { showHitboxes = false, smoothing = true, assetBase = "../../assets" } = {}) {
     this.canvas = canvas;
     this.canvas.width = GAME_WIDTH;
     this.canvas.height = GAME_HEIGHT;
@@ -32,6 +35,8 @@ export class Renderer {
     this.stateSince = new Map(); // fighter id -> {state, since}, for animation timing
     this.effects = new Effects(GAME_WIDTH, GAME_HEIGHT);
     this.lobby = null; // latest lobby message, for the lobby screen
+    this.assetBase = assetBase;
+    this.background = null; // stage art, once loaded
     this._running = false;
   }
 
@@ -43,7 +48,9 @@ export class Renderer {
       this.buffer = new SnapshotBuffer({ delay: this.buffer.delay });
       this.stateSince.clear();
       this.effects = new Effects(GAME_WIDTH, GAME_HEIGHT);
-      // TODO(Person 4): load message.stage.background and each player's sprite atlas here.
+      this.background = null;
+      this._loadBackground(message.stage.background);
+      // TODO(Person 4): load each player's sprite atlas here.
     } else if (message.type === "snapshot") {
       this.buffer.push(message, arrival);
     } else if (message.type === "event") {
@@ -83,7 +90,7 @@ export class Renderer {
     const [dx, dy] = this.effects.shakeOffset(time);
     ctx.save();
     ctx.translate(dx, dy);
-    drawStage(ctx, this.stage);
+    drawStage(ctx, this.stage, this.background);
     for (const fighter of snapshot?.fighters ?? []) {
       drawFighter(ctx, fighter, {
         stateTime: this._stateTime(fighter, time),
@@ -95,6 +102,17 @@ export class Renderer {
 
     if (snapshot) drawHud(ctx, snapshot.fighters, this.names, GAME_WIDTH, GAME_HEIGHT);
     this.effects.drawBanner(ctx, this.names);
+  }
+
+  /** Placeholder rectangles show until the art arrives, or if it fails to load. */
+  _loadBackground(file) {
+    if (!file || typeof Image === "undefined") return;
+    const image = new Image();
+    image.onload = () => {
+      if (this.stage?.background === file) this.background = image;
+    };
+    image.onerror = () => console.warn(`stage art not found: ${image.src}`);
+    image.src = `${this.assetBase}/stages/${file}`;
   }
 
   /** Seconds the fighter has been in its current state, tracked on the client. */

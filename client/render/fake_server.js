@@ -18,7 +18,7 @@ export const MEMORIAL_GLADE = {
   height: 720,
   main: [240, 520, 800, 40],
   platforms: [[340, 380, 180, 12], [760, 380, 180, 12], [550, 250, 180, 12]],
-  background: null,
+  background: "memorial_glade.png",
 };
 
 const GROUND_Y = 520;

@@ -23,7 +23,7 @@ class Stage:
 def battlefield() -> Stage:
     w, h = config.SCREEN_WIDTH, config.SCREEN_HEIGHT
     return Stage(
-        name="Battlefield",
+        name="Memorial Glade",
         main=pygame.Rect(w // 2 - 400, h - 200, 800, 40),
         platforms=[
             pygame.Rect(w // 2 - 300, h - 340, 180, 12),
@@ -31,5 +31,5 @@ def battlefield() -> Stage:
             pygame.Rect(w // 2 - 90, h - 470, 180, 12),
         ],
         spawns=[(w // 2 - 200, h - 400), (w // 2 + 200, h - 400)],
-        background=None,  # TODO(Person 4): e.g. "battlefield.png"
+        background="memorial_glade.png",  # drawn to match these platforms; see assets/stages/
     )

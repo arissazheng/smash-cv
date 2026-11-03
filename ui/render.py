@@ -23,10 +23,11 @@ def draw_stage(screen: pygame.Surface, stage) -> None:
     if stage.background:
         if stage.background not in _backgrounds:
             image = pygame.image.load(str(config.ASSETS_DIR / "stages" / stage.background)).convert()
-            _backgrounds[stage.background] = pygame.transform.smoothscale(image, screen.get_size())
-        screen.blit(_backgrounds[stage.background], (0, 0))
-    else:
-        screen.fill(SKY)
+            # Nearest-neighbor scaling keeps pixel art crisp.
+            _backgrounds[stage.background] = pygame.transform.scale(image, screen.get_size())
+        screen.blit(_backgrounds[stage.background], (0, 0))  # the art already shows the platforms
+        return
+    screen.fill(SKY)
     pygame.draw.rect(screen, GROUND, stage.main)
     for platform in stage.platforms:
         pygame.draw.rect(screen, PLATFORM, platform)

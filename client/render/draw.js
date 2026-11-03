@@ -19,11 +19,11 @@ export function playerColor(id) {
 /** @param {CanvasRenderingContext2D} ctx  @param {import("./protocol.js").Stage} stage */
 export function drawStage(ctx, stage, background = null) {
   if (background) {
-    ctx.drawImage(background, 0, 0, stage.width, stage.height);
-  } else {
-    ctx.fillStyle = SKY;
-    ctx.fillRect(0, 0, stage.width, stage.height);
+    ctx.drawImage(background, 0, 0, stage.width, stage.height); // the art already shows the platforms
+    return;
   }
+  ctx.fillStyle = SKY;
+  ctx.fillRect(0, 0, stage.width, stage.height);
   ctx.fillStyle = GROUND;
   ctx.fillRect(...stage.main);
   ctx.fillStyle = PLATFORM;
